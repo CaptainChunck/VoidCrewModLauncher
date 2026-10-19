@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/VoidCrewModLauncher.Bridge/VoidCrewModLauncher.Bridge.csproj" />
+    <Project Path="src/VoidCrewModLauncher.Core/VoidCrewModLauncher.Core.csproj" />
+    <Project Path="src/VoidCrewModLauncher/VoidCrewModLauncher.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/VoidCrewModLauncher.Tests/VoidCrewModLauncher.Tests.csproj" />
+  </Folder>
+</Solution>

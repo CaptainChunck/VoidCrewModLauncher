@@ -1,0 +1,304 @@
+<UserControl x:Class="VoidCrewModLauncher.Views.BrowserView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:VoidCrewModLauncher.Controls">
+    <UserControl.Resources>
+        <!-- Badges stay readable on the dark rows and on the orange/white hover and selection. -->
+        <Style x:Key="RowBadge" TargetType="Border" BasedOn="{StaticResource Badge}">
+            <Setter Property="Background" Value="#E6101420" />
+        </Style>
+        <Style x:Key="ReadyBadge" TargetType="Border" BasedOn="{StaticResource RowBadge}">
+            <Setter Property="BorderBrush" Value="{StaticResource Green}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Readiness}" Value="Download">
+                    <Setter Property="BorderBrush" Value="{StaticResource LightBlue}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Readiness}" Value="Missing">
+                    <Setter Property="BorderBrush" Value="{StaticResource Red}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Readiness}" Value="Unknown">
+                    <Setter Property="BorderBrush" Value="{StaticResource LightGrey}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="ReadyText" TargetType="TextBlock" BasedOn="{StaticResource BadgeText}">
+            <Setter Property="Foreground" Value="{StaticResource Green}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Readiness}" Value="Download">
+                    <Setter Property="Foreground" Value="{StaticResource LightBlue}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Readiness}" Value="Missing">
+                    <Setter Property="Foreground" Value="{StaticResource Red}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Readiness}" Value="Unknown">
+                    <Setter Property="Foreground" Value="{StaticResource TextMuted}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="ModStatusBadge" TargetType="Border" BasedOn="{StaticResource RowBadge}">
+            <Setter Property="BorderBrush" Value="{StaticResource LightGrey}" />
+            <Setter Property="Margin" Value="6,0,0,0" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding StatusKey}" Value="Ready">
+                    <Setter Property="BorderBrush" Value="{StaticResource Green}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding StatusKey}" Value="Download">
+                    <Setter Property="BorderBrush" Value="{StaticResource LightBlue}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding StatusKey}" Value="Unavailable">
+                    <Setter Property="BorderBrush" Value="{StaticResource Red}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="ModStatusText" TargetType="TextBlock" BasedOn="{StaticResource BadgeText}">
+            <Setter Property="Foreground" Value="{StaticResource TextMuted}" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding StatusKey}" Value="Ready">
+                    <Setter Property="Foreground" Value="{StaticResource Green}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding StatusKey}" Value="Download">
+                    <Setter Property="Foreground" Value="{StaticResource LightBlue}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding StatusKey}" Value="Unavailable">
+                    <Setter Property="Foreground" Value="{StaticResource Red}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="InfoLabel" TargetType="TextBlock" BasedOn="{StaticResource Label}">
+            <Setter Property="Margin" Value="0,3,12,3" />
+            <Setter Property="VerticalAlignment" Value="Top" />
+        </Style>
+        <Style x:Key="InfoValue" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Margin" Value="0,2,0,2" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+        </Style>
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="22" />
+            <ColumnDefinition Width="410" />
+        </Grid.ColumnDefinitions>
+
+        <!-- ============================================================ lobbies -->
+        <HeaderedContentControl Style="{StaticResource Section}">
+            <HeaderedContentControl.Header>
+                <DockPanel LastChildFill="False">
+                    <c:SpacedText Value="LOBBIES" Style="{StaticResource H1}" DockPanel.Dock="Left" />
+                    <Button DockPanel.Dock="Right" Style="{StaticResource SmallButton}" Content="REFRESH" Command="{Binding RefreshCommand}" VerticalAlignment="Center" Margin="8,0,0,0" />
+                    <ComboBox DockPanel.Dock="Right" Width="210" VerticalAlignment="Center" ItemsSource="{Binding Regions}" SelectedItem="{Binding SelectedRegion}"
+                              DisplayMemberPath="Label"
+                              Visibility="{Binding Regions.Count, Converter={StaticResource Show}}" />
+                    <TextBlock DockPanel.Dock="Right" Text="REGION" Style="{StaticResource Label}" VerticalAlignment="Center" Margin="0,0,8,0"
+                               Visibility="{Binding Regions.Count, Converter={StaticResource Show}}" />
+                </DockPanel>
+            </HeaderedContentControl.Header>
+
+            <DockPanel>
+                <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                    <TextBox Width="300" Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" Tag="Search lobbies, hosts, ships, mods" Margin="0,0,12,6" />
+                    <ToggleButton Style="{StaticResource Chip}" Content="HIDE FULL" IsChecked="{Binding HideFull}" Margin="0,0,6,6" />
+                    <ToggleButton Style="{StaticResource Chip}" Content="IN HUB ONLY" IsChecked="{Binding OnlyInHub}" Margin="0,0,6,6" />
+                    <ToggleButton Style="{StaticResource Chip}" Content="MODDED ONLY" IsChecked="{Binding HideVanilla}" Margin="0,0,6,6" />
+                    <ToggleButton Style="{StaticResource Chip}" Content="VANILLA ONLY" IsChecked="{Binding HideModded}" Margin="0,0,6,6" />
+                </WrapPanel>
+
+                <TextBlock DockPanel.Dock="Top" Text="{Binding Banner}" Style="{StaticResource Muted}" Margin="2,0,0,8"
+                           Visibility="{Binding HasBanner, Converter={StaticResource Show}}" />
+
+                <!-- Column headings, on the matchmaking list's header band -->
+                <Border DockPanel.Dock="Top" Background="{StaticResource HeaderBand}" Padding="14,7,20,6" Margin="0,0,6,0">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="140" />
+                        <ColumnDefinition Width="72" />
+                        <ColumnDefinition Width="104" />
+                        <ColumnDefinition Width="150" />
+                        <ColumnDefinition Width="104" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="LOBBY" Style="{StaticResource Label}" />
+                    <TextBlock Grid.Column="1" Text="HOST" Style="{StaticResource Label}" />
+                    <TextBlock Grid.Column="2" Text="CREW" Style="{StaticResource Label}" />
+                    <TextBlock Grid.Column="3" Text="WHERE" Style="{StaticResource Label}" />
+                    <TextBlock Grid.Column="4" Text="MODS" Style="{StaticResource Label}" />
+                    <TextBlock Grid.Column="5" Text="YOU" Style="{StaticResource Label}" />
+                </Grid>
+                </Border>
+
+                <Grid>
+                    <ListBox x:Name="Lobbies" ItemsSource="{Binding LobbiesView}" SelectedItem="{Binding Selected}" MouseDoubleClick="Lobbies_MouseDoubleClick">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="140" />
+                                        <ColumnDefinition Width="72" />
+                                        <ColumnDefinition Width="104" />
+                                        <ColumnDefinition Width="150" />
+                                        <ColumnDefinition Width="104" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Margin="0,0,10,0">
+                                        <StackPanel Orientation="Horizontal">
+                                            <Border Style="{StaticResource RowBadge}" BorderBrush="#FF8000" Visibility="{Binding IsSessionModded, Converter={StaticResource Show}}"
+                                                    ToolTip="[mod_session]">
+                                                <TextBlock Text="M" Style="{StaticResource BadgeText}" Foreground="#FF8000" />
+                                            </Border>
+                                            <TextBlock Text="{Binding Name}" FontSize="16" FontWeight="Bold" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                        <TextBlock Text="{Binding Ship}" FontSize="12" Opacity="0.72" TextTrimming="CharacterEllipsis" Margin="0,2,0,0" />
+                                    </StackPanel>
+                                    <TextBlock Grid.Column="1" Text="{Binding Host}" FontSize="14" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,0,8,0" />
+                                    <TextBlock Grid.Column="2" Text="{Binding Players}" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="3" Text="{Binding Where}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="4" Text="{Binding ModsSummary}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" ToolTip="{Binding ModsTooltip}" />
+                                    <Border Grid.Column="5" Style="{StaticResource ReadyBadge}" HorizontalAlignment="Left">
+                                        <TextBlock Text="{Binding ReadyText}" Style="{StaticResource ReadyText}" />
+                                    </Border>
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+
+                    <!-- No live list: why, and what to do -->
+                    <c:ShapeBorder Style="{StaticResource PopupPanel}" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="600" Padding="28,24"
+                                   Visibility="{Binding OverlayTitle, Converter={StaticResource Show}}">
+                        <StackPanel>
+                            <TextBlock Text="{Binding OverlayTitle}" Style="{StaticResource H1}" FontSize="19" TextWrapping="Wrap" HorizontalAlignment="Center" TextAlignment="Center" />
+                            <Grid Style="{StaticResource PanelRule}">
+                                <Border Height="1" Background="{StaticResource Line}" VerticalAlignment="Center" Opacity="0.7" />
+                                <Border Width="44" Height="3" Background="{StaticResource Orange}" HorizontalAlignment="Center" />
+                            </Grid>
+                            <TextBlock Text="{Binding OverlayText}" Style="{StaticResource Body}" TextAlignment="Center" />
+                            <Button Style="{StaticResource LargeButton}" Content="START VOID CREW" Command="{Binding StartGameCommand}" HorizontalAlignment="Center" Margin="0,20,0,0"
+                                    Visibility="{Binding ShowStartButton, Converter={StaticResource Show}}" />
+                            <CheckBox Content="Minimise the game while I browse" IsChecked="{Binding MinimizeWhenBrowsing}" HorizontalAlignment="Center" Margin="0,14,0,0"
+                                      Visibility="{Binding ShowStartButton, Converter={StaticResource Show}}" />
+                            <Button Style="{StaticResource PrimaryButton}" Content="RESTART FROM THE LAUNCHER" Command="{Binding RestartFromLauncherCommand}" HorizontalAlignment="Center" Margin="0,20,0,0"
+                                    Visibility="{Binding ShowRestartButton, Converter={StaticResource Show}}" />
+                            <ContentControl Style="{StaticResource PanelFooter}" />
+                        </StackPanel>
+                    </c:ShapeBorder>
+                </Grid>
+            </DockPanel>
+        </HeaderedContentControl>
+
+        <!-- ============================================================ details -->
+        <c:ShapeBorder Grid.Column="2" Style="{StaticResource DarkPanel}" Padding="18,16">
+            <Grid>
+                <StackPanel VerticalAlignment="Center" Visibility="{Binding Selected, Converter={StaticResource Hide}}" Margin="10,0">
+                    <TextBlock Text="PICK A LOBBY" Style="{StaticResource H2}" Foreground="White" HorizontalAlignment="Center" />
+                </StackPanel>
+
+                <DockPanel DataContext="{Binding Selected}" Visibility="{Binding Converter={StaticResource Show}}">
+                    <StackPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
+                        <Button Style="{StaticResource LargeButton}" Content="JOIN" HorizontalAlignment="Stretch"
+                                Command="{Binding DataContext.JoinCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" />
+                    </StackPanel>
+
+                    <StackPanel DockPanel.Dock="Top">
+                        <TextBlock Text="{Binding Name}" Style="{StaticResource H2}" Foreground="White" FontSize="21" TextWrapping="Wrap" />
+                        <TextBlock Margin="0,2,0,8" Style="{StaticResource Muted}">
+                            <Run Text="hosted by" /> <Run Text="{Binding Host, Mode=OneWay}" Foreground="White" /> <Run Text="·" /> <Run Text="{Binding Region, Mode=OneWay}" />
+                        </TextBlock>
+                        <WrapPanel Margin="0,0,0,10">
+                            <Border Style="{StaticResource Badge}" BorderBrush="#FF8000" Visibility="{Binding ModdingTag, Converter={StaticResource Show}}">
+                                <TextBlock Text="{Binding ModdingTag}" Style="{StaticResource BadgeText}" Foreground="#FF8000" />
+                            </Border>
+                            <Border Style="{StaticResource Badge}" BorderBrush="{StaticResource LightGrey}" Visibility="{Binding CrossPlay, Converter={StaticResource Show}}">
+                                <TextBlock Text="CROSSPLAY" Style="{StaticResource BadgeText}" Foreground="{StaticResource TextSecondary}" />
+                            </Border>
+                        </WrapPanel>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition />
+                                <RowDefinition />
+                                <RowDefinition />
+                                <RowDefinition />
+                                <RowDefinition />
+                                <RowDefinition />
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Text="CREW" Style="{StaticResource InfoLabel}" />
+                            <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Players}" Style="{StaticResource InfoValue}" />
+                            <TextBlock Grid.Row="1" Text="WHERE" Style="{StaticResource InfoLabel}" />
+                            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Where}" Style="{StaticResource InfoValue}" />
+                            <TextBlock Grid.Row="2" Text="SHIP" Style="{StaticResource InfoLabel}" />
+                            <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding Ship}" Style="{StaticResource InfoValue}" />
+                            <TextBlock Grid.Row="3" Text="SECTOR" Style="{StaticResource InfoLabel}" />
+                            <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding Sector}" Style="{StaticResource InfoValue}" />
+                            <TextBlock Grid.Row="4" Text="MUTATORS" Style="{StaticResource InfoLabel}" />
+                            <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding Mutators}" Style="{StaticResource InfoValue}" />
+                            <TextBlock Grid.Row="5" Text="RANK" Style="{StaticResource InfoLabel}" />
+                            <TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding Rank}" Style="{StaticResource InfoValue}" />
+                        </Grid>
+
+                        <c:SpacedText Value="MODS" Style="{StaticResource H1}" FontSize="15" Margin="0,16,0,0" HorizontalAlignment="Left" />
+                        <Grid Margin="0,6,0,10" Height="3">
+                            <Border Height="1" Background="{StaticResource Line}" VerticalAlignment="Center" Opacity="0.7" />
+                            <Border Width="34" Height="3" Background="{StaticResource Orange}" HorizontalAlignment="Left" />
+                        </Grid>
+                    </StackPanel>
+
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource Muted}" Visibility="{Binding HasMods, Converter={StaticResource Hide}}"
+                                       Text="No mods listed. If the lobby is vanilla, anyone can join; your client-side mods stay on." />
+                            <ItemsControl ItemsSource="{Binding Mods}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Background="{StaticResource Row}" Padding="10,7" Margin="0,0,0,5">
+                                            <Border.Style>
+                                                <Style TargetType="Border">
+                                                    <Setter Property="Opacity" Value="1" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding Needed}" Value="False">
+                                                            <Setter Property="Opacity" Value="0.6" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel>
+                                                    <TextBlock Foreground="White" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis">
+                                                        <Run Text="{Binding Name, Mode=OneWay}" /> <Run Text="{Binding Version, Mode=OneWay}" FontWeight="Normal" Foreground="{StaticResource TextMuted}" FontSize="12" />
+                                                    </TextBlock>
+                                                    <TextBlock Text="{Binding Author}" Foreground="{StaticResource TextMuted}" FontSize="11.5" Visibility="{Binding Author, Converter={StaticResource Show}}" />
+                                                    <TextBlock Text="{Binding Note}" Foreground="{StaticResource Orange}" FontSize="11.5" TextWrapping="Wrap" Visibility="{Binding Note, Converter={StaticResource Show}}" />
+                                                </StackPanel>
+                                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <Border Style="{StaticResource Badge}" BorderBrush="{StaticResource LightGrey}" Margin="0">
+                                                        <TextBlock Text="{Binding NeedText}" Style="{StaticResource BadgeText}" Foreground="{StaticResource TextSecondary}" />
+                                                    </Border>
+                                                    <Border Style="{StaticResource ModStatusBadge}">
+                                                        <TextBlock Text="{Binding StatusText}" Style="{StaticResource ModStatusText}" />
+                                                    </Border>
+                                                </StackPanel>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <TextBlock Text="{Binding Warnings}" Foreground="{StaticResource Orange}" FontSize="12.5" TextWrapping="Wrap" Margin="0,8,0,0"
+                                       Visibility="{Binding Warnings, Converter={StaticResource Show}}" />
+                            <TextBlock Text="{Binding KeptText}" Style="{StaticResource Muted}" FontSize="12" Margin="0,8,0,0" Visibility="{Binding KeptText, Converter={StaticResource Show}}" />
+                            <TextBlock Text="{Binding TurnedOffText}" Style="{StaticResource Muted}" FontSize="12" Margin="0,4,0,0" Visibility="{Binding TurnedOffText, Converter={StaticResource Show}}" />
+                        </StackPanel>
+                    </ScrollViewer>
+                </DockPanel>
+            </Grid>
+        </c:ShapeBorder>
+    </Grid>
+</UserControl>

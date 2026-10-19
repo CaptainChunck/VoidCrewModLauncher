@@ -1,0 +1,7 @@
+{
+  "name": "Void_Crew_Mod_Launcher",
+  "version_number": "0.1.0",
+  "website_url": "https://github.com/CaptainChunck/VoidCrewModLauncher",
+  "description": "Server browser and mod manager for Void Crew: see every public lobby with the mods it runs, join with one click (its mods are installed for you), manage your mods and host modded lobbies. A standalone Windows app.",
+  "dependencies": []
+}

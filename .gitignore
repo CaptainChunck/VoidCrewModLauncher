@@ -1,0 +1,21 @@
+# Build output
+bin/
+obj/
+artifacts/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userprefs
+
+# Never commit game or BepInEx binaries; the bridge build references them from the local install
+*.dll
+*.pdb
+*.exe
+
+# Release builds (tools/package.ps1)
+dist/
+
+# Rendered UI previews (VoidCrewModLauncher.exe --render-previews)
+docs/previews/

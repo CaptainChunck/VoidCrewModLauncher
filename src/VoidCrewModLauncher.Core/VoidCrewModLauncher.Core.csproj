@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Everything the launcher does that isn't UI: Thunderstore, the mod library, the per-launch BepInEx folder, starting
+       the game, and the connection to the bridge plugin inside the game. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>VoidCrewModLauncher.Core</RootNamespace>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Shared\*.cs" Link="Shared\%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <!-- The bridge plugin is built first and carried inside this assembly; the launcher installs it before every launch. -->
+  <ItemGroup>
+    <ProjectReference Include="..\VoidCrewModLauncher.Bridge\VoidCrewModLauncher.Bridge.csproj" ReferenceOutputAssembly="false" Private="false" SkipGetTargetFrameworkProperties="true" SetTargetFramework="TargetFramework=net48" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="..\VoidCrewModLauncher.Bridge\bin\$(Configuration)\net48\VoidCrewModLauncher.Bridge.dll" LogicalName="VoidCrewModLauncher.Bridge.dll" Visible="false" />
+  </ItemGroup>
+</Project>

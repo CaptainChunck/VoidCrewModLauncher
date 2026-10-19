@@ -1,0 +1,19 @@
+<Application x:Class="VoidCrewModLauncher.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:i="clr-namespace:VoidCrewModLauncher.Infrastructure"
+             ShutdownMode="OnMainWindowClose">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Theme/VoidCrew.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <i:VisibleWhen x:Key="Show" />
+            <i:VisibleWhen x:Key="Hide" Invert="True" />
+            <i:Not x:Key="Not" />
+            <i:Upper x:Key="Upper" />
+            <i:Pack x:Key="Pack" />
+            <i:EqualsParameter x:Key="Is" />
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

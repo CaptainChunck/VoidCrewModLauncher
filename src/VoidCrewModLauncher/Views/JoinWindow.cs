@@ -1,0 +1,155 @@
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
+using VoidCrewModLauncher.Core.Lobbies;
+using VoidCrewModLauncher.Infrastructure;
+
+namespace VoidCrewModLauncher.Views;
+
+/// <summary>
+/// JOIN's check before anything happens: the lobby's mods (tickable where the launcher only guessed they're needed),
+/// what will be downloaded, which of your mods stay on, and whether the game restarts.
+/// </summary>
+public sealed class JoinWindow : Window
+{
+    private readonly JoinPlan _plan;
+    private readonly Func<JoinPlan, ResolvedJoin> _resolve;
+    private readonly Func<ResolvedJoin, bool> _needsRestart;
+    private readonly TextBlock _summary;
+    private readonly Button _join;
+    private readonly bool _running;
+
+    /// <param name="needsRestart">Whether the running game has to restart for this mod set (ticking mods can change it).</param>
+    public JoinWindow(JoinPlan plan, Func<JoinPlan, ResolvedJoin> resolve, Func<ResolvedJoin, bool> needsRestart, bool running)
+    {
+        _plan = plan;
+        _resolve = resolve;
+        _needsRestart = needsRestart;
+        _running = running;
+        _join = Dialogs.MakeButton("JOIN", ButtonKind.Primary);
+        var body = new StackPanel { Width = 600 };
+
+        body.Children.Add(Text($"{plan.Lobby.Name}", 17, Brushes.White, FontWeights.SemiBold));
+        body.Children.Add(Text($"hosted by {plan.Lobby.Room.Host} · {plan.Lobby.Room.Players}/{plan.Lobby.Room.MaxPlayers} crew", 13, Brush("TextMuted")));
+
+        var needed = plan.Lines.Where(l => l.Mod.JoinerNeeds).ToList();
+        var notNeeded = plan.Lines.Where(l => !l.Mod.JoinerNeeds).ToList();
+        if (needed.Count > 0)
+        {
+            body.Children.Add(Heading("THIS LOBBY NEEDS"));
+            foreach (JoinPlanLine line in needed) body.Children.Add(LineRow(line));
+        }
+        else
+        {
+            body.Children.Add(Heading("MODS"));
+            body.Children.Add(Text(plan.Lobby.ModsUnknown ? "The lobby doesn't list its mods." : "None.", 13, Brush("TextSecondary")));
+        }
+        if (notNeeded.Count > 0)
+        {
+            body.Children.Add(Text("Host only: " + string.Join(", ", notNeeded.Select(l => l.Mod.DisplayName)), 12.5, Brush("TextMuted"), margin: new Thickness(0, 8, 0, 0)));
+        }
+
+        body.Children.Add(Heading("YOUR MODS FOR THIS GAME"));
+        body.Children.Add(Text(plan.Kept.Count == 0 ? "Stay on: none" : "Stay on: " + string.Join(", ", plan.Kept.Select(m => m.DisplayName)), 13, Brush("TextSecondary")));
+        if (plan.TurnedOff.Count > 0)
+        {
+            body.Children.Add(Text("Off for this game: " + string.Join(", ", plan.TurnedOff.Select(m => m.DisplayName)), 13, Brush("TextMuted"), margin: new Thickness(0, 4, 0, 0)));
+        }
+        foreach (string warning in plan.Warnings)
+        {
+            body.Children.Add(Text(warning, 13, Brush("Orange"), margin: new Thickness(0, 10, 0, 0)));
+        }
+
+        _summary = Text("", 13.5, Brushes.White, FontWeights.SemiBold, new Thickness(0, 16, 0, 0));
+        body.Children.Add(_summary);
+        UpdateSummary();
+
+        Dialogs.Decorate(this, "Join lobby", new ScrollViewer { Content = body, MaxHeight = 560, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }, out StackPanel buttons);
+        _join.IsDefault = true;
+        _join.Click += (_, _) => DialogResult = true;
+        Button cancel = Dialogs.MakeButton("CANCEL", ButtonKind.Normal);
+        cancel.IsCancel = true;
+        buttons.Children.Add(_join);
+        buttons.Children.Add(cancel);
+    }
+
+    private UIElement LineRow(JoinPlanLine line)
+    {
+        var row = new Grid { Margin = new Thickness(0, 0, 0, 6), Background = Brush("Row") };
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var check = new CheckBox
+        {
+            IsChecked = line.Include,
+            IsEnabled = line.Optional && line.Status != LobbyModStatus.Unavailable,
+            Margin = new Thickness(10, 0, 4, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        check.Checked += (_, _) => { line.Include = true; UpdateSummary(); };
+        check.Unchecked += (_, _) => { line.Include = false; UpdateSummary(); };
+        row.Children.Add(check);
+
+        var name = new StackPanel { Margin = new Thickness(6, 7, 8, 7) };
+        string version = line.Version?.VersionNumber ?? line.Mod.Version;
+        name.Children.Add(Text($"{line.Mod.DisplayName}  v{version}", 14, Brushes.White, FontWeights.SemiBold));
+        string by = line.Mod.Package != null ? "by " + line.Mod.Package.Author : line.Mod.Local ? "the host's own mod" : "not on Thunderstore";
+        name.Children.Add(Text(by, 12, Brush("TextMuted")));
+        if (line.Note != null) name.Children.Add(Text(line.Note, 12, Brush("Orange")));
+        Grid.SetColumn(name, 1);
+        row.Children.Add(name);
+
+        (string text, string color) = line.Status switch
+        {
+            LobbyModStatus.Ready => ("INSTALLED", "Green"),
+            LobbyModStatus.Download => ("DOWNLOAD", "LightBlue"),
+            LobbyModStatus.Unavailable => ("CAN'T GET", "Red"),
+            _ => ("NOT NEEDED", "LightGrey"),
+        };
+        var badge = new Border
+        {
+            Style = (Style)Application.Current.Resources["Badge"],
+            BorderBrush = Brush(color),
+            Margin = new Thickness(0, 0, 10, 0),
+            Child = new TextBlock { Text = text, Style = (Style)Application.Current.Resources["BadgeText"], Foreground = Brush(color) },
+        };
+        Grid.SetColumn(badge, 2);
+        row.Children.Add(badge);
+        return row;
+    }
+
+    private void UpdateSummary()
+    {
+        ResolvedJoin join = _resolve(_plan);
+        bool restart = _running && _needsRestart(join);
+        string downloads = join.Downloads.Count == 0
+            ? ""
+            : $"Downloads {join.Downloads.Count} mod{(join.Downloads.Count == 1 ? "" : "s")} ({Format.Bytes(join.DownloadBytes)}). ";
+        string game = !_running ? "Starts Void Crew and joins."
+            : restart ? "Restarts Void Crew and joins."
+            : "Joins right away.";
+        _summary.Text = downloads + game;
+        _join.Content = restart ? "RESTART AND JOIN" : "JOIN";
+    }
+
+    private static TextBlock Heading(string text) => new()
+    {
+        Text = text,
+        Style = (Style)Application.Current.Resources["Label"],
+        FontSize = 13,
+        Margin = new Thickness(0, 16, 0, 6),
+    };
+
+    private static TextBlock Text(string text, double size, Brush color, FontWeight? weight = null, Thickness? margin = null) => new()
+    {
+        Text = text,
+        FontSize = size,
+        Foreground = color,
+        FontWeight = weight ?? FontWeights.Normal,
+        TextWrapping = TextWrapping.Wrap,
+        Margin = margin ?? new Thickness(0),
+    };
+
+    private static Brush Brush(string key) => (Brush)Application.Current.Resources[key];
+}

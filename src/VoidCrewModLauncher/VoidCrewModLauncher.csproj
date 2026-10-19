@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>VoidCrewModLauncher</AssemblyName>
+    <RootNamespace>VoidCrewModLauncher</RootNamespace>
+    <Version>0.1.0</Version>
+    <Product>Void Crew Mod Launcher</Product>
+    <Company>CaptainChunck</Company>
+    <Description>Server browser, mod manager and lobby host for Void Crew</Description>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\launcher.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+  </ItemGroup>
+
+  <!-- WPF leaves System.IO out of the implicit usings (Path clashes with System.Windows.Shapes.Path); this app draws no
+       Shapes.Path in code, so take it back. -->
+  <ItemGroup>
+    <Using Include="System.IO" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VoidCrewModLauncher.Core\VoidCrewModLauncher.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\launcher.png" />
+    <Resource Include="Assets\launcher.ico" />
+  </ItemGroup>
+</Project>
