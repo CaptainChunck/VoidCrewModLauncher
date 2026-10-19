@@ -31,8 +31,18 @@ public partial class App : Application
             return;
         }
 
-        // The release exe installs itself on its first start (the one-click install), and uninstalls from Windows' apps list.
+        // A downloaded update installing itself over the launcher that downloaded it (see Installer.StartUpdate).
         var locations = InstallLocations.ForThisUser();
+        int apply = Array.FindIndex(e.Args, a => a.Equals(Installer.ApplyUpdateArgument, StringComparison.OrdinalIgnoreCase));
+        if (apply >= 0)
+        {
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            RunApplyUpdate(e.Args[(apply + 1)..], locations);
+            Shutdown();
+            return;
+        }
+
+        // The release exe installs itself on its first start (the one-click install), and uninstalls from Windows' apps list.
         if (e.Args.Any(a => a.Equals("--uninstall", StringComparison.OrdinalIgnoreCase)))
         {
             ShutdownMode = ShutdownMode.OnExplicitShutdown;
@@ -68,12 +78,47 @@ public partial class App : Application
         _service = new LauncherService(paths);
         _service.Start();
         var dialogs = new Dialogs();
-        var model = new MainViewModel(_service, dialogs);
+        var model = new MainViewModel(_service, dialogs) { LauncherArguments = LauncherArguments(e.Args) };
         var window = new MainWindow { DataContext = model };
         dialogs.Owner = window;
         MainWindow = window;
         window.Show();
-        _ = model.StartAsync();
+        _ = model.StartAsync(Argument(e.Args, Installer.UpdatedArgument));
+    }
+
+    /// <summary>The arguments a restarted launcher keeps (after a self-update).</summary>
+    private static List<string> LauncherArguments(string[] args)
+    {
+        var kept = new List<string>();
+        if (args.Any(a => a.Equals("--portable", StringComparison.OrdinalIgnoreCase))) kept.Add("--portable");
+        if (Argument(args, "--data-dir") is { } dataDir) kept.AddRange(new[] { "--data-dir", dataDir });
+        return kept;
+    }
+
+    /// <summary>
+    /// The new version, started by the old one: waits for it to close, takes its place and starts it again. If that
+    /// fails, the old version starts as it was.
+    /// </summary>
+    private static void RunApplyUpdate(string[] args, InstallLocations locations)
+    {
+        if (args.Length < 2 || !int.TryParse(args[0], out int oldProcess)) return;
+        string target = args[1];
+        List<string> restart = args[2..].ToList();
+        try
+        {
+            Installer.ApplyUpdate(Environment.ProcessPath!, oldProcess, target, locations, AppInfo.Version);
+        }
+        catch (Exception error)
+        {
+            MessageBox.Show($"The launcher couldn't update itself ({error.Message}).\n\nIt opens as it was. The new version is on {AppInfo.RepositoryUrl}/releases/latest.",
+                AppInfo.Name, MessageBoxButton.OK, MessageBoxImage.Warning);
+            int updated = restart.FindIndex(a => a.Equals(Installer.UpdatedArgument, StringComparison.OrdinalIgnoreCase));
+            if (updated >= 0) restart.RemoveRange(updated, Math.Min(2, restart.Count - updated));
+        }
+        if (InstallLocations.IsTestInstall || !File.Exists(target)) return;
+        var start = new ProcessStartInfo(target) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(target)! };
+        foreach (string argument in restart) start.ArgumentList.Add(argument);
+        Process.Start(start)?.Dispose();
     }
 
     protected override void OnExit(ExitEventArgs e)

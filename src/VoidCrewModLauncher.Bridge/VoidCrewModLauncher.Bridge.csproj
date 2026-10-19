@@ -13,7 +13,6 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <AssemblyName>VoidCrewModLauncher.Bridge</AssemblyName>
     <RootNamespace>VoidCrewModLauncher.Bridge</RootNamespace>
-    <Version>0.1.0</Version>
     <Deterministic>true</Deterministic>
     <DebugType>portable</DebugType>
     <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>

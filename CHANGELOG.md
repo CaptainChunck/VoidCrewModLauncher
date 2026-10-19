@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.0
+
+- **The launcher updates itself:** at start it looks for a new version on GitHub. When there is one, it downloads it
+  (checked against the checksum GitHub lists), installs it and opens again, with a window saying so.
+- **Mods update themselves:** at start and on REFRESH, installed Thunderstore mods update to their newest versions.
+  SETTINGS > UPDATES has a switch for each, and CHECK FOR UPDATES looks right away.
+- **Newest versions from Thunderstore:** Thunderstore caches its community list on its side, at times an hour or more
+  behind, and a package can even be missing from it for a while. Installs, updates and joins now check each mod with
+  Thunderstore directly, so a mod updated minutes ago installs at its new version. The list itself comes from
+  Thunderstore's listing index, which it rebuilds more often.
+- **Joining modded lobbies:** the launcher turns on Void Crew's "Can join [mod_session] games" setting, so modded
+  lobbies can be joined from the launcher and from the game's own list.
+- A lobby running a mod version the list doesn't have yet shows it as a download instead of "can't get".
+
 ## 0.1.0
 
 First release.

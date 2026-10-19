@@ -33,6 +33,16 @@ public sealed class TsPackage
 
     public TsVersion? Version(string? version) =>
         string.IsNullOrEmpty(version) ? null : Versions.FirstOrDefault(v => VersionNumber.Same(v.VersionNumber, version));
+
+    /// <summary>A copy of this package with <paramref name="extra"/> versions added (newest first); this one isn't changed.</summary>
+    public TsPackage WithVersions(IEnumerable<TsVersion> extra)
+    {
+        var copy = (TsPackage)MemberwiseClone();
+        copy.Versions = extra.Where(v => Version(v.VersionNumber) == null).Concat(Versions)
+            .OrderByDescending(v => v.VersionNumber, VersionNumber.Comparer).ToList();
+        if (copy.Versions.Count > 0 && copy.Versions.Max(v => v.DateCreated) is var newest && newest > copy.DateUpdated) copy.DateUpdated = newest;
+        return copy;
+    }
 }
 
 public sealed class TsVersion

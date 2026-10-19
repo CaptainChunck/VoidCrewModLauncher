@@ -24,6 +24,17 @@ public sealed class LauncherSettings
     /// <summary>The player agreed that the launcher may add BepInEx's Doorstop loader to the game folder.</summary>
     public bool DoorstopConsent { get; set; }
 
+    /// <summary>At start, look for a new launcher on GitHub and install it.</summary>
+    public bool AutoUpdateLauncher { get; set; } = true;
+
+    /// <summary>At start and on refresh, update installed Thunderstore mods to their newest versions.</summary>
+    public bool AutoUpdateMods { get; set; } = true;
+
+    /// <summary>The launcher version the self-update last tried, and when: a release that won't install isn't retried in a loop.</summary>
+    public string? UpdateTriedVersion { get; set; }
+
+    public DateTime? UpdateTriedUtc { get; set; }
+
     public HostSettings Host { get; set; } = new();
 
     public BrowserSettings Browser { get; set; } = new();

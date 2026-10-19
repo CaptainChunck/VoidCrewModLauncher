@@ -44,6 +44,8 @@ it hosts lobbies with your mods in one click.
   - **ADD MOD FILE** adds a DLL or zip that isn't on Thunderstore.
 - **MODS**: every Void Crew mod on Thunderstore, with search, categories, sorting, downloads and
   ratings, the mod's README, and one-click install with dependencies.
+- **Updates**: at start (and on REFRESH) installed mods update to their newest versions. Each mod is checked with
+  Thunderstore directly, because Thunderstore's community list can be an hour or more behind.
 
 ![Mod manager: installed mods with on/off switches](docs/screenshots/mod-manager-installed.png)
 
@@ -80,8 +82,9 @@ Before the game is running, the server browser offers to start it (the lobby lis
   unmodded. If another loader is already there (Rai Pal, r2modman, a manual BepInEx), it is left exactly as it is.
 - **Mod settings carry over.** `BepInEx\config` is kept between launches, whichever lobby you join.
 - **The bridge never changes the game.** It reads the room list, joins and hosts through the game's own join and host
-  code (so the game's checks still apply, including "Can join [mod_session] games"), and adds the mod list to lobbies
-  you host. It doesn't mark rooms as modded: your other mods do that as Void Crew's modding guidelines ask.
+  code (so the game's checks still apply), and adds the mod list to lobbies you host. It doesn't mark rooms as modded:
+  your other mods do that as Void Crew's modding guidelines ask. The one setting it changes is the game's own "Can join
+  [mod_session] games", which it turns on so modded lobbies can be joined.
 
 ## Install
 
@@ -93,7 +96,9 @@ Before the game is running, the server browser offers to start it (the lobby lis
 Windows 10 or 11 (64-bit); no .NET install needed. Windows may warn about an unrecognised app the first time: choose
 **More info**, then **Run anyway**. The first launch downloads BepInEx (BepInExPack) from Thunderstore.
 
-- **Update:** download the new `VoidCrewModLauncher-Setup.exe` and double-click it (close the launcher first).
+- **Update:** the launcher updates itself: at start it checks GitHub, downloads a new version (checked against the
+  checksum GitHub lists), installs it and opens again. SETTINGS > UPDATES turns this and the mod updates off or checks
+  right away. (Version 0.1.0 can't update itself: install 0.2.0 once by hand.)
 - **Uninstall:** Windows **Settings > Apps > Installed apps > Void Crew Mod Launcher > Uninstall**. It asks whether to
   delete your downloaded mods and settings too, and removes BepInEx's loader from the game folder if the launcher added it.
 - **Portable:** put an empty `portable.txt` next to the exe (or start it with `--portable`) and it runs where it is.
@@ -134,6 +139,9 @@ Windows 10 or 11 (64-bit); no .NET install needed. Windows may warn about an unr
 - **Look at the pages without the game:** `VoidCrewModLauncher.exe --render-previews <folder>` draws every page with
   sample lobbies into PNGs.
 - `--data-dir <folder>` (or the `VCML_DATA_DIR` environment variable) runs the launcher with a separate data folder.
+- To try the install or the self-update without touching your real install: `VCML_INSTALL_ROOT=<folder>` installs into
+  that folder (and a test registry key), and `VCML_UPDATE_FEED=<url>` reads the release from that URL (GitHub's release
+  JSON) instead of GitHub.
 
 ## License
 

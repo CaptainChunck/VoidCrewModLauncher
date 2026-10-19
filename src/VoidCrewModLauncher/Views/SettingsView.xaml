@@ -45,6 +45,20 @@
                         <TextBlock Text="MINIMISE THE GAME WHILE BROWSING" Style="{StaticResource Label}" VerticalAlignment="Center" Margin="0" />
                     </DockPanel>
                 </HeaderedContentControl>
+
+                <HeaderedContentControl Style="{StaticResource Section}" Header="UPDATES" Margin="0,24,0,0">
+                    <StackPanel>
+                        <DockPanel>
+                            <CheckBox DockPanel.Dock="Right" Style="{StaticResource Switch}" IsChecked="{Binding AutoUpdateLauncher}" VerticalAlignment="Center" />
+                            <TextBlock Text="UPDATE THE LAUNCHER AUTOMATICALLY" Style="{StaticResource Label}" VerticalAlignment="Center" Margin="0" />
+                        </DockPanel>
+                        <DockPanel Margin="0,16,0,0">
+                            <CheckBox DockPanel.Dock="Right" Style="{StaticResource Switch}" IsChecked="{Binding AutoUpdateMods}" VerticalAlignment="Center" />
+                            <TextBlock Text="UPDATE MODS AUTOMATICALLY" Style="{StaticResource Label}" VerticalAlignment="Center" Margin="0" />
+                        </DockPanel>
+                        <Button Style="{StaticResource SmallButton}" Content="CHECK FOR UPDATES" Command="{Binding CheckForUpdatesCommand}" HorizontalAlignment="Left" Margin="0,16,0,0" />
+                    </StackPanel>
+                </HeaderedContentControl>
             </StackPanel>
 
             <StackPanel Grid.Column="2">

@@ -75,6 +75,36 @@ public partial class SettingsViewModel : ObservableObject
         }
     }
 
+    public bool AutoUpdateLauncher
+    {
+        get => Service.Settings.AutoUpdateLauncher;
+        set
+        {
+            Service.Settings.AutoUpdateLauncher = value;
+            Service.SaveSettings();
+            OnPropertyChanged();
+        }
+    }
+
+    public bool AutoUpdateMods
+    {
+        get => Service.Settings.AutoUpdateMods;
+        set
+        {
+            Service.Settings.AutoUpdateMods = value;
+            Service.SaveSettings();
+            OnPropertyChanged();
+        }
+    }
+
+    /// <summary>A new launcher from GitHub (installed straight away), then updates for the installed mods.</summary>
+    [RelayCommand]
+    private async Task CheckForUpdates()
+    {
+        if (await _main.UpdateLauncherAsync(manual: true)) return;
+        if (await _main.UpdateModsAsync() == null) _main.SetStatus(_main.StatusText + " Your mods are up to date.");
+    }
+
     public void Refresh()
     {
         string? game = Service.GameDirectory;

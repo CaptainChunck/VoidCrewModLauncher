@@ -8,7 +8,6 @@
     <LangVersion>latest</LangVersion>
     <AssemblyName>VoidCrewModLauncher</AssemblyName>
     <RootNamespace>VoidCrewModLauncher</RootNamespace>
-    <Version>0.1.0</Version>
     <Product>Void Crew Mod Launcher</Product>
     <Company>CaptainChunck</Company>
     <Description>Server browser, mod manager and lobby host for Void Crew</Description>

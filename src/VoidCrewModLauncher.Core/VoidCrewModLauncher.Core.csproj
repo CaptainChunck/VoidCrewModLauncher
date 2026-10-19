@@ -7,7 +7,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <RootNamespace>VoidCrewModLauncher.Core</RootNamespace>
-    <Version>0.1.0</Version>
   </PropertyGroup>
 
   <ItemGroup>

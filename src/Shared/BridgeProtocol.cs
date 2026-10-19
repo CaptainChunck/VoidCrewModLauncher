@@ -258,6 +258,12 @@ namespace VoidCrewModLauncher.Protocol
         /// rooms (MatchmakingController.SimulateDebugRooms), gives them sample mod lists, and lists them like real ones.
         /// </summary>
         public int DebugRooms { get; set; }
+
+        /// <summary>
+        /// Developer testing only: the bridge switches the game's "Can join [mod_session] games" off in memory first, so
+        /// turning it on (and the game saving it) runs even when the setting is already on.
+        /// </summary>
+        public bool TestModdedJoinsOff { get; set; }
     }
 
     public class LaunchMod

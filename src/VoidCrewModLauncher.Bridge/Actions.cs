@@ -59,8 +59,12 @@ namespace VoidCrewModLauncher.Bridge
             if (state is GSMainMenu && !GameInfo.InLobby) return "Void Crew isn't connected to its lobby server yet.";
             if (command.Modded && !GameInfo.CanJoinModded())
             {
-                return "This lobby is [mod_session] and your Void Crew settings don't allow joining those. " +
-                       "Turn on \"Can join [mod_session] games\" in the game's General settings, then join again.";
+                GameInfo.AllowModdedJoins();
+                if (!GameInfo.CanJoinModded())
+                {
+                    return "This lobby is [mod_session] and your Void Crew settings don't allow joining those. " +
+                           "Turn on \"Can join [mod_session] games\" in the game's General settings, then join again.";
+                }
             }
             MatchmakingRoom listed = GameInfo.ListedRoom(command.RoomId);
             if (listed != null && !GameInfo.Joinable(listed, PAL.Platform.GetPlatform(), GameInfo.HasCrossPlay()))

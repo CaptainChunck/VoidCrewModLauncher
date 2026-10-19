@@ -13,10 +13,14 @@ param(
 $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
 $project = Join-Path $root "src\VoidCrewModLauncher\VoidCrewModLauncher.csproj"
-$version = ([xml](Get-Content $project)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+$version = ([xml](Get-Content (Join-Path $root "Directory.Build.props"))).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
 $manifest = Get-Content (Join-Path $root "thunderstore\manifest.json") -Raw | ConvertFrom-Json
 if ($manifest.version_number -ne $version) {
-    throw "thunderstore\manifest.json says $($manifest.version_number) but the launcher's project says $version; make them match."
+    throw "thunderstore\manifest.json says $($manifest.version_number) but Directory.Build.props says $version; make them match."
+}
+$plugin = Select-String -Path (Join-Path $root "src\VoidCrewModLauncher.Bridge\Plugin.cs") -Pattern 'const string Version = "([^"]+)"'
+if ($plugin.Matches[0].Groups[1].Value -ne $version) {
+    throw "The bridge's Plugin.cs says $($plugin.Matches[0].Groups[1].Value) but Directory.Build.props says $version; make them match."
 }
 
 $properties = @("-p:Configuration=Release")

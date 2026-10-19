@@ -95,6 +95,37 @@ namespace VoidCrewModLauncher.Bridge
             }
         }
 
+        /// <summary>Developer test (LaunchFile.TestModdedJoinsOff): the setting off in memory, not saved.</summary>
+        public static void TestModdedJoinsOff()
+        {
+            if (!SettingsManager.IsRunning) return;
+            SettingsManager.CurrentSettings.GeneralSettings.JoinModdedGames.SetValue(0);
+            Log.Warn("Developer test: switched \"Can join [mod_session] games\" off in memory.");
+        }
+
+        /// <summary>
+        /// Turns on the game's "Can join [mod_session] games" (General settings) and saves it with the game's own
+        /// settings (Settings.json): the launcher is there to join modded lobbies. False until the game has loaded its
+        /// settings.
+        /// </summary>
+        public static bool AllowModdedJoins()
+        {
+            if (!SettingsManager.IsRunning) return false;
+            try
+            {
+                IntSetting setting = SettingsManager.CurrentSettings.GeneralSettings.JoinModdedGames;
+                if (setting.ValueAsBool) return true;
+                setting.SetValue(1);
+                SettingsManager.Save();
+                Log.Info("Turned on Void Crew's \"Can join [mod_session] games\" setting for the launcher.");
+            }
+            catch (Exception e)
+            {
+                Log.Failure("Turning on joining modded games", e);
+            }
+            return true;
+        }
+
         public static bool CanHost()
         {
             try

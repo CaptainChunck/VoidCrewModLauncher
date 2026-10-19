@@ -26,6 +26,7 @@ namespace VoidCrewModLauncher.Bridge
         private bool _autoDone;
         private float _autoGiveUpAt;
         private bool _debugRoomsDone;
+        private bool _moddedJoinsAllowed;
 
         private void Start()
         {
@@ -46,6 +47,12 @@ namespace VoidCrewModLauncher.Bridge
         {
             try
             {
+                // Once the game has loaded its settings, so modded lobbies can be joined (from the launcher or the game).
+                if (!_moddedJoinsAllowed && Launch != null)
+                {
+                    if (Launch.TestModdedJoinsOff) GameInfo.TestModdedJoinsOff();
+                    _moddedJoinsAllowed = GameInfo.AllowModdedJoins();
+                }
                 Actions.Tick();
                 Advertiser.Tick();
                 RunAutoAction();

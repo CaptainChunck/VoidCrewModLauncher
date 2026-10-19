@@ -29,9 +29,12 @@ Crew through Steam and downloads BepInEx for you.
   MODS with every Void Crew mod on Thunderstore.
 - **Host lobby**: name, public or private, crew size, crossplay; starts the game straight into your hub with your mods.
   Players who join through the launcher get your mods automatically.
+- **Updates**: the launcher updates itself from GitHub and keeps your mods on their newest Thunderstore versions
+  (SETTINGS > UPDATES).
 
 The lobby list comes from your own game: start Void Crew from the launcher and the list fills once the main menu is up.
 Your Void Crew folder only gets BepInEx's loader (after asking, and switched off when you start the game from Steam).
+The launcher turns on the game's "Can join [mod_session] games" setting so modded lobbies can be joined.
 
 ## Uninstall
 

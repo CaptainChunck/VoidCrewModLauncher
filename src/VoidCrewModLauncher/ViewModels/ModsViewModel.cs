@@ -147,18 +147,15 @@ public partial class ModsViewModel : ObservableObject
 
     [RelayCommand]
     private Task Update(InstalledModViewModel row) =>
-        _main.RunAsync($"Updating {row.Name}", () => _main.Service.Mods.UpdateAsync(row.Id, Progress()));
+        _main.RunAsync($"Updating {row.Name}", () => _main.Service.UpdateModAsync(row.Id, Progress()));
 
     private bool CanUpdateAll() => UpdateCount > 0;
 
     [RelayCommand(CanExecute = nameof(CanUpdateAll))]
-    private Task UpdateAll() => _main.RunAsync("Updating mods", async () =>
+    private async Task UpdateAll()
     {
-        foreach ((InstalledMod mod, _) in _main.Service.Mods.Updates())
-        {
-            await _main.Service.Mods.UpdateAsync(mod.Id, Progress());
-        }
-    });
+        if (await _main.UpdateModsAsync() == null) _main.SetStatus("Your mods are up to date.");
+    }
 
     [RelayCommand]
     private void Uninstall(InstalledModViewModel row)
@@ -223,7 +220,7 @@ public partial class ModsViewModel : ObservableObject
         {
             foreach ((ImportCandidate candidate, bool fromThunderstore) in picked)
             {
-                if (fromThunderstore && candidate.Match != null) await _main.Service.Mods.InstallAsync(candidate.Match.FullName, null, Progress());
+                if (fromThunderstore && candidate.Match != null) await _main.Service.InstallModAsync(candidate.Match.FullName, Progress());
                 else LocalMods.Import(_main.Service.Mods, candidate);
             }
             int configs = LocalMods.CopyMissingConfigs(folder, _main.Service.Paths.RuntimeBepInEx);
@@ -305,11 +302,25 @@ public partial class ModsViewModel : ObservableObject
     {
         Readme = null;
         if (value == null) return;
+        _ = FreshenAsync(value.Id);
         if (value.Icon == null && value.Package.Latest?.Icon is { } iconUrl) _ = SetIconAsync(iconUrl, icon => value.Icon = icon);
         int request = ++_readmeRequest;
         TsVersion? latest = value.Package.Latest;
         if (latest == null) return;
         _ = LoadReadmeAsync(value.Package, latest, request);
+    }
+
+    /// <summary>Checks the package shown in the details with Thunderstore (its list can be behind).</summary>
+    private async Task FreshenAsync(string id)
+    {
+        try
+        {
+            await _main.Service.FreshenAsync(new[] { id });
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            AppLog.Warn($"Checking {id} on Thunderstore failed: {e.Message}");
+        }
     }
 
     private async Task LoadReadmeAsync(TsPackage package, TsVersion version, int request)
@@ -338,9 +349,10 @@ public partial class ModsViewModel : ObservableObject
         }
         return _main.RunAsync($"Installing {package.Name}", async () =>
         {
-            if (package.HasUpdate) await _main.Service.Mods.UpdateAsync(package.Id, Progress());
-            else await _main.Service.Mods.InstallAsync(package.Id, null, Progress());
-            _main.SetStatus($"{package.Name} is installed and on. It loads the next time you play or host.");
+            if (package.HasUpdate) await _main.Service.UpdateModAsync(package.Id, Progress());
+            else await _main.Service.InstallModAsync(package.Id, Progress());
+            string version = _main.Service.Library.Find(package.Id)?.Version ?? package.LatestVersion;
+            _main.SetStatus($"{package.Name} {version} is installed and on. It loads the next time you play or host.");
         });
     }
 
@@ -351,5 +363,32 @@ public partial class ModsViewModel : ObservableObject
     private void OpenPackageWebsite(PackageViewModel package) => Format.Open(package.Package.Latest?.WebsiteUrl);
 
     [RelayCommand]
-    private Task RefreshOnlineList() => _main.RunAsync("Refreshing Thunderstore's mod list", () => _main.Service.RefreshPackagesAsync(true));
+    private async Task RefreshOnlineList()
+    {
+        if (!await _main.RunAsync("Refreshing Thunderstore's mod list", () => _main.Service.RefreshPackagesAsync(true))) return;
+        if (_main.Service.Settings.AutoUpdateMods) await _main.UpdateModsAsync();
+    }
+
+    /// <summary>Newer data for some packages arrived: those rows change in place (the list keeps its place and selection).</summary>
+    public void OnPackagesFreshened(IReadOnlyCollection<string> ids)
+    {
+        LauncherService service = _main.Service;
+        foreach (string id in ids)
+        {
+            if (service.Index.Find(id) is not { } package) continue;
+            PackageViewModel? row = _online.FirstOrDefault(p => string.Equals(p.Id, id, StringComparison.OrdinalIgnoreCase));
+            if (row != null)
+            {
+                string before = row.LatestVersion;
+                row.Replace(package);
+                if (row == SelectedPackage && before != row.LatestVersion) OnSelectedPackageChanged(row);
+            }
+            else if (_online.Count > 0 && service.Index.Mods.Contains(package))
+            {
+                // A package Thunderstore's list left out.
+                _online.Add(new PackageViewModel(package, service.Library.Find(package.FullName)));
+            }
+        }
+        RefreshInstalled();
+    }
 }

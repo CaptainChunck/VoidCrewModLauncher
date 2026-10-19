@@ -198,6 +198,37 @@ public partial class BrowserViewModel : ObservableObject
         ShownCount = LobbiesView.Cast<object>().Count();
         Selected = _lobbies.FirstOrDefault(l => l.Id == selectedId);
         RaiseOverlay();
+        LookUpMissingVersions();
+    }
+
+    /// <summary>Mod versions lobbies run that the launcher has looked up on Thunderstore this session.</summary>
+    private readonly HashSet<string> _lookedUp = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Thunderstore's list can be behind the versions lobbies run (or miss a package); looks those up so the rows show
+    /// them as downloadable. The rows are drawn again when something is found.
+    /// </summary>
+    private void LookUpMissingVersions()
+    {
+        foreach (LobbyViewModel row in _lobbies)
+        {
+            List<string> missing = row.Lobby.Mods.Where(m => !m.Local && m.PackageVersion == null && m.PackageId != null)
+                .Select(m => $"{m.PackageId}@{m.Version}").Where(_lookedUp.Add).ToList();
+            if (missing.Count > 0) _ = FreshenLobbyAsync(row.Lobby);
+        }
+    }
+
+    private async Task<bool> FreshenLobbyAsync(Lobby lobby)
+    {
+        try
+        {
+            return await _main.Service.FreshenLobbyAsync(lobby);
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            AppLog.Warn($"Looking up {lobby.Name}'s mods on Thunderstore failed: {e.Message}");
+            return false;
+        }
     }
 
     private bool Filter(object item)
@@ -286,11 +317,21 @@ public partial class BrowserViewModel : ObservableObject
         LauncherService service = _main.Service;
         if (lobby.IsFull && !_main.Dialogs.Confirm("Lobby is full", $"{lobby.Name} is full ({lobby.Players}). Try anyway?", "TRY ANYWAY")) return;
 
+        // The lobby's exact mod versions, looked up on Thunderstore when its list doesn't have them yet.
+        Lobby current = lobby.Lobby;
+        if (current.Mods.Any(m => !m.Local && m.PackageVersion == null && m.PackageId != null))
+        {
+            _main.SetStatus($"Looking up {current.Name}'s mods on Thunderstore...");
+            await FreshenLobbyAsync(current);
+            current = LobbyReader.Read(current.Room, current.Region, service.Index);
+            _main.SetStatus("Ready.");
+        }
+
         // Re-plan against the current library, then let the player check it.
-        JoinPlan plan = service.Planner.Plan(lobby.Lobby);
+        JoinPlan plan = service.Planner.Plan(current);
         if (!_main.Dialogs.ConfirmJoin(plan, service.Planner.Resolve, j => !service.CanJoinWithoutRestart(j), _main.GameRunning)) return;
         ResolvedJoin join = service.Planner.Resolve(plan);
-        await JoinWith(lobby.Lobby, join);
+        await JoinWith(current, join);
     }
 
     /// <param name="restart">Start the game again even when its mods look right (it was turned away for a mod it has loaded).</param>

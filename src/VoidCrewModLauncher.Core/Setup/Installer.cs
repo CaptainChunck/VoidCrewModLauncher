@@ -10,6 +10,9 @@ public sealed record InstallLocations(string InstallDirectory, string StartMenuD
     public const string ExeName = "VoidCrewModLauncher.exe";
     public const string ShortcutName = "Void Crew Mod Launcher.lnk";
 
+    /// <summary>The release download: the same exe, which installs itself when started from anywhere else.</summary>
+    public const string SetupName = "VoidCrewModLauncher-Setup.exe";
+
     public string InstalledExe => Path.Combine(InstallDirectory, ExeName);
 
     /// <summary>Set to a folder to try the install there (Programs, StartMenu and Desktop inside it, a test registry key).</summary>
@@ -88,12 +91,7 @@ public static class Installer
     public static void Install(string sourceExe, InstallLocations locations, string version)
     {
         Directory.CreateDirectory(locations.InstallDirectory);
-        string temp = locations.InstalledExe + ".new";
-        File.Copy(sourceExe, temp, true);
-        // A downloaded setup carries Windows' "came from the internet" mark, and a copy keeps it. The player has already
-        // chosen to run this file, so the installed copy shouldn't ask again each time it starts.
-        TryDelete(temp + ZoneStream);
-        File.Move(temp, locations.InstalledExe, true);
+        CopyExe(sourceExe, locations.InstalledExe);
 
         CreateShortcut(Path.Combine(locations.StartMenuDirectory, InstallLocations.ShortcutName), locations.InstalledExe);
         CreateShortcut(Path.Combine(locations.DesktopDirectory, InstallLocations.ShortcutName), locations.InstalledExe);
@@ -112,6 +110,74 @@ public static class Installer
             key.SetValue("NoRepair", 1, RegistryValueKind.DWord);
             key.SetValue("EstimatedSize", (int)(new FileInfo(locations.InstalledExe).Length / 1024), RegistryValueKind.DWord);
         }
+    }
+
+    /// <summary>
+    /// Puts <paramref name="sourceExe"/> at <paramref name="target"/>, through a temporary copy so a failed copy never leaves
+    /// half an exe. Retries for a few seconds while the old exe is still closing.
+    /// </summary>
+    private static void CopyExe(string sourceExe, string target)
+    {
+        string temp = target + ".new";
+        File.Copy(sourceExe, temp, true);
+        // A downloaded setup carries Windows' "came from the internet" mark, and a copy keeps it. The player has already
+        // chosen to run this file, so the installed copy shouldn't ask again each time it starts.
+        TryDelete(temp + ZoneStream);
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                File.Move(temp, target, true);
+                return;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException && attempt < 20)
+            {
+                Thread.Sleep(500);
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- self-update
+
+    /// <summary>
+    /// Starts a downloaded new version to replace <paramref name="target"/> (this launcher's exe) once this process has
+    /// closed. The caller closes the launcher right after. <paramref name="arguments"/> are passed on to the restarted
+    /// launcher.
+    /// </summary>
+    public static void StartUpdate(string setup, string target, IEnumerable<string> arguments)
+    {
+        var start = new ProcessStartInfo(setup) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(setup)! };
+        start.ArgumentList.Add(ApplyUpdateArgument);
+        start.ArgumentList.Add(Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        start.ArgumentList.Add(target);
+        foreach (string argument in arguments) start.ArgumentList.Add(argument);
+        Process.Start(start)?.Dispose();
+    }
+
+    /// <summary>The argument a downloaded update starts with: --apply-update &lt;old process id&gt; &lt;exe to replace&gt; [launcher arguments].</summary>
+    public const string ApplyUpdateArgument = "--apply-update";
+
+    /// <summary>The argument the updated launcher starts with: --updated &lt;old version&gt;.</summary>
+    public const string UpdatedArgument = "--updated";
+
+    /// <summary>
+    /// Run by the new version: waits for the old launcher to close, then installs this exe over it (the install, with its
+    /// shortcuts and uninstall entry, or a portable copy in place). Throws when the old launcher won't close.
+    /// </summary>
+    public static void ApplyUpdate(string sourceExe, int oldProcessId, string target, InstallLocations locations, string version)
+    {
+        try
+        {
+            using Process old = Process.GetProcessById(oldProcessId);
+            if (!old.WaitForExit(30_000)) throw new InvalidOperationException("The old launcher didn't close.");
+        }
+        catch (ArgumentException)
+        {
+            // Already closed.
+        }
+        if (SamePath(target, locations.InstalledExe)) Install(sourceExe, locations, version);
+        else CopyExe(sourceExe, target);
+        AppLog.Info($"Updated the launcher at {target} to {version}.");
     }
 
     /// <summary>

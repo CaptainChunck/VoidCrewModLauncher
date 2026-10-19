@@ -31,6 +31,9 @@ public sealed class LobbyMod
     /// <summary>The host's own local mod: not on Thunderstore.</summary>
     public bool Local { get; init; }
 
+    /// <summary>The Thunderstore id ("Namespace-Name") the host's game gave, even when the package list doesn't know it yet.</summary>
+    public string? PackageId { get; init; }
+
     public TsPackage? Package { get; set; }
 
     /// <summary>The exact version on Thunderstore, when it has it.</summary>
@@ -113,6 +116,7 @@ public static class LobbyReader
                     Need = mod.Need,
                     NeedFromHost = mod.Need != ModNeed.Unknown,
                     Local = mod.Local,
+                    PackageId = mod.Local ? null : PackageIndex.NormalizeId(mod.Id),
                     Package = package,
                     PackageVersion = package?.Version(mod.Version),
                 });
@@ -149,6 +153,7 @@ public static class LobbyReader
                     Version = mod.Version,
                     Need = need,
                     NeedFromHost = need != ModNeed.Unknown,
+                    PackageId = package?.FullName ?? PackageIndex.NormalizeId(mod.DownloadId),
                     Package = package,
                     PackageVersion = package?.Version(mod.Version),
                 });

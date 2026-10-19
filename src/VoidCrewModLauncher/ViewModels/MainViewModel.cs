@@ -5,8 +5,10 @@ using CommunityToolkit.Mvvm.Input;
 using VoidCrewModLauncher.Core;
 using VoidCrewModLauncher.Core.Game;
 using VoidCrewModLauncher.Core.Mods;
+using VoidCrewModLauncher.Core.Setup;
 using VoidCrewModLauncher.Infrastructure;
 using VoidCrewModLauncher.Protocol;
+using VoidCrewModLauncher.Views;
 
 namespace VoidCrewModLauncher.ViewModels;
 
@@ -54,6 +56,11 @@ public partial class MainViewModel : ObservableObject
             Browser.RefreshLobbies();
             OnPropertyChanged(nameof(ThunderstoreText));
         });
+        service.PackagesFreshened += ids => OnUi(() =>
+        {
+            Mods.OnPackagesFreshened(ids);
+            Browser.RefreshLobbies();
+        });
         service.Library.Changed += () => OnUi(() =>
         {
             Mods.RefreshInstalled();
@@ -79,6 +86,9 @@ public partial class MainViewModel : ObservableObject
 
     public LauncherService Service { get; }
     public Dialogs Dialogs { get; }
+
+    /// <summary>The launcher's own command-line options, kept when it restarts after a self-update.</summary>
+    public IReadOnlyList<string> LauncherArguments { get; init; } = Array.Empty<string>();
     public Icons Icons { get; }
     public BrowserViewModel Browser { get; }
     public ModsViewModel Mods { get; }
@@ -324,26 +334,142 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    /// <summary>Loads Thunderstore's list at start-up (from the cache when it's fresh).</summary>
-    public async Task StartAsync()
+    /// <summary>
+    /// Start-up: a new launcher from GitHub first (it restarts the launcher), then Thunderstore's list (from the cache when
+    /// it's fresh) and updates for the installed mods.
+    /// </summary>
+    /// <param name="updatedFrom">The version this launcher was updated from, when it just updated itself.</param>
+    public async Task StartAsync(string? updatedFrom = null)
     {
+        if (updatedFrom != null)
+        {
+            Updater.CleanUp();
+            AppLog.Info($"The launcher updated itself from {updatedFrom} to {AppInfo.Version}.");
+        }
+        else if (Service.Settings.AutoUpdateLauncher && await UpdateLauncherAsync(manual: false))
+        {
+            return;
+        }
+
+        string updatedText = updatedFrom != null ? $"Updated the launcher to {AppInfo.Version}. " : "";
         try
         {
             SetStatus("Loading Thunderstore's Void Crew mods...");
             await Service.RefreshPackagesAsync(false);
+            string? modsText = Service.Settings.AutoUpdateMods ? await UpdateModsAsync() : null;
             int updates = Service.Mods.Updates().Count;
-            SetStatus(updates > 0 ? $"{updates} of your mods can be updated (MOD MANAGER)." : "Ready.");
+            SetStatus(updatedText + (modsText ?? (updates > 0 ? $"{updates} of your mods can be updated (MOD MANAGER)." : "Ready.")));
         }
         catch (Exception e)
         {
             AppLog.Error("Loading Thunderstore's mod list failed", e);
-            SetStatus("Thunderstore couldn't be reached. Mods you have still work; try REFRESH on the MODS tab later.");
+            SetStatus(updatedText + "Thunderstore couldn't be reached. Mods you have still work; try REFRESH on the MODS tab later.");
         }
         if (Service.GameDirectory == null)
         {
             Navigate("settings");
             Dialogs.Info("Void Crew not found", "The launcher couldn't find Void Crew through Steam. Choose its folder on the SETTINGS tab (the one with Void Crew.exe).");
         }
+    }
+
+    /// <summary>
+    /// Updates every installed Thunderstore mod that has a newer version (checked with Thunderstore first). Returns the
+    /// status line for what changed, or null when every mod was up to date.
+    /// </summary>
+    public async Task<string?> UpdateModsAsync()
+    {
+        try
+        {
+            await Service.FreshenAsync(Service.Library.Mods.Where(m => m.Source == ModSource.Thunderstore).Select(m => m.Id));
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            AppLog.Warn($"Checking the installed mods on Thunderstore failed: {e.Message}");
+        }
+        if (Service.Mods.Updates().Count == 0) return null;
+
+        (List<string> Updated, List<string> Failed) result = (new List<string>(), new List<string>());
+        await RunAsync("Updating mods", async () =>
+        {
+            result = await Service.UpdateModsAsync(new SyncProgress<InstallStatus>(s => OnUi(() => SetStatus(s.Message, s.Fraction))));
+        });
+        string text = "";
+        if (result.Updated.Count > 0) text = $"Updated {result.Updated.Count} mod{(result.Updated.Count == 1 ? "" : "s")}: {string.Join(", ", result.Updated)}.";
+        if (result.Failed.Count > 0) text += $"{(text.Length > 0 ? " " : "")}Couldn't update {string.Join(", ", result.Failed)} (see the launcher log).";
+        if (text.Length > 0) SetStatus(text);
+        return text.Length > 0 ? text : null;
+    }
+
+    /// <summary>
+    /// The launcher's self-update: when GitHub has a newer release, downloads it with a window saying so, starts it to
+    /// install itself and closes this launcher. True when the launcher is closing for the update.
+    /// </summary>
+    /// <param name="manual">From CHECK FOR UPDATES: says when there's nothing new, and tries again even right after a failed attempt.</param>
+    public async Task<bool> UpdateLauncherAsync(bool manual)
+    {
+        if (!Installer.IsPublishedBuild)
+        {
+            if (manual) SetStatus("This is a developer build; it doesn't update itself.");
+            return false;
+        }
+        using var updater = new Updater();
+        LauncherRelease? release;
+        try
+        {
+            if (manual) SetStatus("Checking GitHub for a new launcher...");
+            release = await updater.CheckAsync(AppInfo.Version);
+        }
+        catch (Exception e)
+        {
+            AppLog.Warn($"Checking GitHub for a new launcher failed: {e.Message}");
+            if (manual) SetStatus("GitHub couldn't be reached to check for a new launcher.");
+            return false;
+        }
+        if (release == null)
+        {
+            if (manual) SetStatus($"The launcher is up to date ({AppInfo.Version}).");
+            return false;
+        }
+
+        LauncherSettings settings = Service.Settings;
+        if (!manual && settings.UpdateTriedVersion == release.Version && settings.UpdateTriedUtc is { } tried && DateTime.UtcNow - tried < TimeSpan.FromHours(6))
+        {
+            AppLog.Warn($"Launcher {release.Version} was installed at {tried:u} but this is still {AppInfo.Version}; not trying again for a while.");
+            SetStatus($"Launcher {release.Version} is out but didn't install. Try CHECK FOR UPDATES on the SETTINGS tab, or get it from GitHub.");
+            return false;
+        }
+
+        AppLog.Info($"Updating the launcher from {AppInfo.Version} to {release.Version}.");
+        string? setup = UpdateWindow.Download(Application.Current?.MainWindow, updater, release, out Exception? error);
+        if (setup == null)
+        {
+            if (error == null || error is OperationCanceledException)
+            {
+                SetStatus($"Update to {release.Version} cancelled. The launcher tries again next time it starts.");
+            }
+            else
+            {
+                AppLog.Error($"Downloading launcher {release.Version} failed", error);
+                SetStatus($"The launcher couldn't update to {release.Version}: {error.Message}");
+            }
+            return false;
+        }
+
+        settings.UpdateTriedVersion = release.Version;
+        settings.UpdateTriedUtc = DateTime.UtcNow;
+        Service.SaveSettings();
+        try
+        {
+            Installer.StartUpdate(setup, Environment.ProcessPath!, LauncherArguments.Concat(new[] { Installer.UpdatedArgument, AppInfo.Version }));
+        }
+        catch (Exception e)
+        {
+            AppLog.Error("Starting the launcher update failed", e);
+            SetStatus($"The launcher couldn't update to {release.Version}: {e.Message}");
+            return false;
+        }
+        Application.Current?.Shutdown();
+        return true;
     }
 
     public static void Ui(Action action) => Application.Current?.Dispatcher.BeginInvoke(action);

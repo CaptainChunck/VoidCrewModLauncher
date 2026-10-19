@@ -26,6 +26,35 @@ public sealed class PackageIndex
 
     public static PackageIndex Empty { get; } = new(Array.Empty<TsPackage>());
 
+    /// <summary>
+    /// This index with up-to-date packages merged in (from Thunderstore's per-package API): versions it doesn't have are
+    /// added to their package, and packages it doesn't have are added. Returns this same index when nothing is new.
+    /// </summary>
+    public PackageIndex Merge(IEnumerable<TsPackage> fresh)
+    {
+        var replaced = new Dictionary<string, TsPackage>(StringComparer.OrdinalIgnoreCase);
+        var added = new List<TsPackage>();
+        foreach (TsPackage update in fresh)
+        {
+            if (update.Versions.Count == 0) continue;
+            TsPackage? current = replaced.TryGetValue(update.FullName, out TsPackage? done) ? done
+                : _byId.TryGetValue(update.FullName, out TsPackage? known) ? known
+                : added.FirstOrDefault(p => string.Equals(p.FullName, update.FullName, StringComparison.OrdinalIgnoreCase));
+            if (current == null)
+            {
+                added.Add(update.WithVersions(Array.Empty<TsVersion>()));
+                continue;
+            }
+            if (update.Versions.All(v => current.Version(v.VersionNumber) != null)) continue;
+            TsPackage merged = current.WithVersions(update.Versions);
+            int addedAt = added.IndexOf(current);
+            if (addedAt >= 0) added[addedAt] = merged;
+            else replaced[update.FullName] = merged;
+        }
+        if (replaced.Count == 0 && added.Count == 0) return this;
+        return new PackageIndex(All.Select(p => replaced.TryGetValue(p.FullName, out TsPackage? merged) ? merged : p).Concat(added));
+    }
+
     public IReadOnlyList<TsPackage> All { get; }
 
     /// <summary>What the Mods tab lists: not BepInEx itself, not mod managers, not NSFW.</summary>

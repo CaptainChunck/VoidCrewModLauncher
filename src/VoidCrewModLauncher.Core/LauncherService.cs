@@ -36,12 +36,13 @@ public sealed class DoorstopConsentNeededException(string gameDirectory)
 /// </summary>
 public sealed class LauncherService : IDisposable
 {
-    public LauncherService(AppPaths paths)
+    /// <param name="thunderstoreHandler">Answers Thunderstore's requests instead of the internet (tests).</param>
+    public LauncherService(AppPaths paths, HttpMessageHandler? thunderstoreHandler = null)
     {
         Paths = paths;
         paths.EnsureCreated();
         Settings = LauncherSettings.Load(paths);
-        Thunderstore = new ThunderstoreClient(paths);
+        Thunderstore = new ThunderstoreClient(paths, thunderstoreHandler);
         Library = new ModLibrary(paths);
         Store = new PackageStore(paths, Thunderstore);
         Mods = new ModManager(Library, Store);
@@ -71,7 +72,12 @@ public sealed class LauncherService : IDisposable
 
     public LaunchMode? LastLaunchMode { get; private set; }
 
+    /// <summary>The package list was loaded again.</summary>
     public event Action? PackagesChanged;
+
+    /// <summary>Newer data for some packages (by id) was merged into the list; the rest is unchanged.</summary>
+    public event Action<IReadOnlyCollection<string>>? PackagesFreshened;
+
     public event Action<InstallStatus>? Status;
 
     /// <summary>The Void Crew folder: from Settings, else found through Steam.</summary>
@@ -94,11 +100,111 @@ public sealed class LauncherService : IDisposable
 
     public void SaveSettings() => Settings.Save(Paths);
 
+    /// <summary>
+    /// Loads Thunderstore's package list, then checks every installed Thunderstore mod against the per-package API: the
+    /// list is cached on Thunderstore's side and can be an hour or more behind, or miss a package.
+    /// </summary>
     public async Task RefreshPackagesAsync(bool force, CancellationToken cancel = default)
     {
         List<TsPackage> packages = await Thunderstore.GetPackagesAsync(force, cancel);
-        Mods.Index = new PackageIndex(packages);
+        var index = new PackageIndex(packages);
+        if (!Thunderstore.IsOffline)
+        {
+            IEnumerable<string> installed = Library.Mods.Where(m => m.Source == ModSource.Thunderstore).Select(m => m.Id);
+            index = index.Merge(await Thunderstore.GetCurrentAsync(installed, cancel));
+        }
+        Mods.Index = index;
         PackagesChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// Brings packages up to date from the per-package API, with the dependencies of their newest versions that the list
+    /// doesn't have recent enough versions of.
+    /// </summary>
+    public async Task FreshenAsync(IEnumerable<string> ids, CancellationToken cancel = default)
+    {
+        var asked = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var fresh = new List<TsPackage>();
+        List<string> next = ids.Where(id => !string.IsNullOrEmpty(id)).ToList();
+        while (next.Count > 0 && asked.Count < 64)
+        {
+            List<TsPackage> found = await Thunderstore.GetCurrentAsync(next.Where(asked.Add), cancel);
+            fresh.AddRange(found);
+            PackageIndex known = Mods.Index.Merge(fresh);
+            next = found.SelectMany(p => p.Latest?.Dependencies ?? new List<string>())
+                .Select(PackageReference.Parse).OfType<PackageReference>()
+                .Where(d => !PackageIndex.IsBepInExPack(d.Id) && !asked.Contains(d.Id)
+                            && (known.Find(d.Id) is not { } package || VersionNumber.Compare(package.Latest?.VersionNumber, d.Version) < 0))
+                .Select(d => d.Id).ToList();
+        }
+        Merge(fresh);
+    }
+
+    /// <summary>
+    /// Looks up the exact versions a lobby runs that the package list doesn't have yet (or packages missing from it).
+    /// True when something was found; read the lobby again with <see cref="Index"/> to see it.
+    /// </summary>
+    public async Task<bool> FreshenLobbyAsync(Lobby lobby, CancellationToken cancel = default)
+    {
+        var fresh = new List<TsPackage>();
+        foreach (LobbyMod mod in lobby.Mods.Where(m => !m.Local && m.PackageVersion == null && m.PackageId != null))
+        {
+            TsVersion? exact = await Thunderstore.GetVersionAsync(mod.PackageId!, mod.Version, cancel);
+            if (exact == null) continue;
+            TsPackage? package = mod.Package ?? Index.Find(mod.PackageId) ?? (await Thunderstore.GetCurrentAsync(new[] { mod.PackageId! }, cancel)).FirstOrDefault();
+            if (package != null) fresh.Add(package.WithVersions(new[] { exact }));
+        }
+        return Merge(fresh);
+    }
+
+    /// <summary>Merges fresh package data into the list and tells the UI which packages changed.</summary>
+    private bool Merge(List<TsPackage> fresh)
+    {
+        if (fresh.Count == 0) return false;
+        PackageIndex before = Mods.Index;
+        PackageIndex merged = before.Merge(fresh);
+        if (ReferenceEquals(merged, before)) return false;
+        Mods.Index = merged;
+        PackagesFreshened?.Invoke(fresh.Select(p => p.FullName).Distinct(StringComparer.OrdinalIgnoreCase).ToList());
+        return true;
+    }
+
+    /// <summary>Installs a Thunderstore mod at its newest version (checked with Thunderstore first) and turns it on.</summary>
+    public async Task<InstalledMod> InstallModAsync(string id, IProgress<InstallStatus>? status, CancellationToken cancel = default)
+    {
+        await FreshenAsync(new[] { id }, cancel);
+        return await Mods.InstallAsync(id, null, status, cancel);
+    }
+
+    /// <summary>Updates one installed mod to its newest version (checked with Thunderstore first).</summary>
+    public async Task UpdateModAsync(string id, IProgress<InstallStatus>? status, CancellationToken cancel = default)
+    {
+        await FreshenAsync(new[] { id }, cancel);
+        await Mods.UpdateAsync(id, status, cancel);
+    }
+
+    /// <summary>
+    /// Updates every installed Thunderstore mod that has a newer version. One that fails doesn't stop the others.
+    /// Returns "Name version" of each update, and the names of the mods that couldn't update.
+    /// </summary>
+    public async Task<(List<string> Updated, List<string> Failed)> UpdateModsAsync(IProgress<InstallStatus>? status, CancellationToken cancel = default)
+    {
+        var updated = new List<string>();
+        var failed = new List<string>();
+        foreach ((InstalledMod mod, TsVersion latest) in Mods.Updates())
+        {
+            try
+            {
+                await Mods.UpdateAsync(mod.Id, status, cancel);
+                updated.Add($"{mod.DisplayName} {latest.VersionNumber}");
+            }
+            catch (Exception e) when (e is not OperationCanceledException)
+            {
+                AppLog.Error($"Updating {mod.Id} to {latest.VersionNumber} failed", e);
+                failed.Add(mod.DisplayName);
+            }
+        }
+        return (updated, failed);
     }
 
     private void Report(string message, double? fraction = null) => Status?.Invoke(new InstallStatus(message, fraction));

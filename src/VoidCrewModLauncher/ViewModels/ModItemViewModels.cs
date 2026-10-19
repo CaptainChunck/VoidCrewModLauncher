@@ -88,7 +88,14 @@ public partial class PackageViewModel : ObservableObject
         Installed = installed;
     }
 
-    public TsPackage Package { get; }
+    public TsPackage Package { get; private set; }
+
+    /// <summary>Shows newer data for the same package (every binding refreshes).</summary>
+    public void Replace(TsPackage package)
+    {
+        Package = package;
+        OnPropertyChanged(string.Empty);
+    }
 
     [ObservableProperty] private ImageSource? icon;
     [ObservableProperty] private InstalledMod? installed;
