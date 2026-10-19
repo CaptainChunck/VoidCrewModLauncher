@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0
+
+- **Newer versions from GitHub:** for a mod whose Thunderstore page links its GitHub repo, the launcher also checks the
+  repo's latest release. When that is newer than Thunderstore's version, the mod installs and updates from the release:
+  its package zip (which must say it is that mod at that version, and match GitHub's checksum), or its plugin DLLs put
+  into the Thunderstore files. Such versions show a GITHUB badge. Players joining a lobby whose host runs a GitHub
+  version get the same release. SETTINGS > UPDATES has a switch for it.
+- **Told in the game when a mod updates:** while Void Crew runs from the launcher, the launcher checks its mods every 15
+  minutes. When one of them gets an update, one quiet line appears in your own text chat (only you see it) saying to
+  restart Void Crew from the launcher. Nothing pops up, pauses or makes a sound, and each update is told once.
+- GitHub's answers are kept and asked for again with their ETag, so the checks stay well inside GitHub's limits.
+
 ## 0.2.0
 
 - **The launcher updates itself:** at start it looks for a new version on GitHub. When there is one, it downloads it

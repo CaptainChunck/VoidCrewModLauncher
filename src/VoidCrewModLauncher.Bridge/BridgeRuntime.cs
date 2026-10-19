@@ -55,6 +55,7 @@ namespace VoidCrewModLauncher.Bridge
                 }
                 Actions.Tick();
                 Advertiser.Tick();
+                Notices.Tick();
                 RunAutoAction();
                 SimulateDebugRooms();
                 if (_connection == null) return;
@@ -191,6 +192,9 @@ namespace VoidCrewModLauncher.Bridge
                 case MessageTypes.Quit:
                     Log.Info("The launcher asked Void Crew to close (to start it again with other mods).");
                     Application.Quit();
+                    break;
+                case MessageTypes.Notify:
+                    Notices.Add(Json.Read<NotifyCommand>(message).Text);
                     break;
             }
         }

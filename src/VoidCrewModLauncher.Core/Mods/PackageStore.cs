@@ -1,4 +1,6 @@
 using System.IO.Compression;
+using System.Text.Json;
+using VoidCrewModLauncher.Core.GitHub;
 using VoidCrewModLauncher.Core.Thunderstore;
 
 namespace VoidCrewModLauncher.Core.Mods;
@@ -12,12 +14,14 @@ public sealed class PackageStore
 {
     private readonly AppPaths _paths;
     private readonly ThunderstoreClient _thunderstore;
+    private readonly GitHubClient? _github;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
-    public PackageStore(AppPaths paths, ThunderstoreClient thunderstore)
+    public PackageStore(AppPaths paths, ThunderstoreClient thunderstore, GitHubClient? github = null)
     {
         _paths = paths;
         _thunderstore = thunderstore;
+        _github = github;
     }
 
     public string VersionDirectory(string id, string version) => Path.Combine(_paths.Store, SafeName(id), SafeName(version));
@@ -30,17 +34,24 @@ public sealed class PackageStore
         return Directory.Exists(dir) ? Directory.GetDirectories(dir).Select(Path.GetFileName).OfType<string>().Where(v => !v.StartsWith('.')) : Enumerable.Empty<string>();
     }
 
-    /// <summary>Downloads and unpacks one Thunderstore version unless it's already in the store; returns its folder.</summary>
+    /// <summary>Downloads and unpacks one version (from Thunderstore or GitHub) unless it's already in the store; returns its folder.</summary>
     public async Task<string> EnsureAsync(TsVersion version, IProgress<double>? progress = null, CancellationToken cancel = default)
     {
         PackageReference reference = PackageReference.Parse(version.FullName) ?? throw new InvalidDataException($"Not a package version: {version.FullName}");
         string target = VersionDirectory(reference.Id, version.VersionNumber);
         if (Directory.Exists(target)) return target;
+        // Plugin DLLs from a GitHub release go into the files of a Thunderstore version, which is needed first.
+        if (version.GitHub is { Package: null, Base: { } basis }) await EnsureAsync(basis, null, cancel);
 
         await _gate.WaitAsync(cancel);
         try
         {
             if (Directory.Exists(target)) return target;
+            if (version.GitHub is { } github)
+            {
+                await AddFromGitHubAsync(reference, version, github, target, progress, cancel);
+                return target;
+            }
             AppLog.Info($"Downloading {version.FullName}.");
             string zip = await _thunderstore.DownloadAsync(version, progress, cancel);
             try
@@ -59,8 +70,96 @@ public sealed class PackageStore
         }
     }
 
-    /// <summary>Unpacks a zip into <paramref name="target"/>, refusing entries that would land outside it.</summary>
-    public static void Unpack(string zip, string target)
+    /// <summary>
+    /// A version from a mod's GitHub release: its package zip, which must be this package at this version (its manifest
+    /// says so), or plugin DLLs that replace the files of the same names in a copy of the Thunderstore version.
+    /// </summary>
+    private async Task AddFromGitHubAsync(PackageReference reference, TsVersion version, GitHubSource github, string target, IProgress<double>? progress, CancellationToken cancel)
+    {
+        if (_github == null) throw new InvalidOperationException("GitHub downloads aren't available here.");
+        AppLog.Info($"Downloading {version.FullName} from GitHub ({github.ReleaseUrl}).");
+        if (github.Package != null)
+        {
+            string zip = await _github.DownloadAsync(github.Package, progress, cancel);
+            try
+            {
+                await Task.Run(() => Unpack(zip, target, folder => CheckManifest(folder, reference, version)), cancel);
+            }
+            finally
+            {
+                TryDelete(zip);
+            }
+            return;
+        }
+
+        string basis = VersionDirectory(reference.Id, github.Base!.VersionNumber);
+        string temp = target + ".patching";
+        if (Directory.Exists(temp)) Directory.Delete(temp, true);
+        CopyDirectory(basis, temp);
+        foreach (GitHubAsset plugin in github.Plugins)
+        {
+            string file = await _github.DownloadAsync(plugin, progress, cancel);
+            try
+            {
+                List<string> same = Directory.GetFiles(temp, "*", SearchOption.AllDirectories)
+                    .Where(f => string.Equals(Path.GetFileName(f), plugin.Name, StringComparison.OrdinalIgnoreCase)).ToList();
+                if (same.Count == 0)
+                {
+                    Directory.Delete(temp, true);
+                    throw new InvalidDataException($"{plugin.Name} in {github.Repo}'s release isn't a file of {reference.Id}; not using that release.");
+                }
+                foreach (string existing in same) File.Copy(file, existing, true);
+            }
+            finally
+            {
+                TryDelete(file);
+            }
+        }
+        if (Directory.Exists(target)) Directory.Delete(target, true);
+        Directory.Move(temp, target);
+    }
+
+    /// <summary>A package from GitHub must say it is this package at this version; its dependencies replace the guessed ones.</summary>
+    private static void CheckManifest(string folder, PackageReference reference, TsVersion version)
+    {
+        string manifest = Path.Combine(folder, "manifest.json");
+        if (!File.Exists(manifest)) throw new InvalidDataException($"The GitHub release of {reference.Id} {version.VersionNumber} has no manifest.json; not using it.");
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(manifest));
+        JsonElement root = document.RootElement;
+        string? name = root.TryGetProperty("name", out JsonElement n) && n.ValueKind == JsonValueKind.String ? n.GetString() : null;
+        string? number = root.TryGetProperty("version_number", out JsonElement v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+        if (!string.Equals(name, reference.Name, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException($"The GitHub release's package is {name}, not {reference.Name}; not using it.");
+        }
+        if (!VersionNumber.Same(number, version.VersionNumber))
+        {
+            throw new InvalidDataException($"The GitHub release {version.VersionNumber} of {reference.Name} has a package saying {number}; not using it.");
+        }
+        if (root.TryGetProperty("dependencies", out JsonElement dependencies) && dependencies.ValueKind == JsonValueKind.Array)
+        {
+            version.Dependencies = dependencies.EnumerateArray().Where(d => d.ValueKind == JsonValueKind.String).Select(d => d.GetString()!).ToList();
+        }
+    }
+
+    private static void CopyDirectory(string source, string target)
+    {
+        Directory.CreateDirectory(target);
+        foreach (string directory in Directory.GetDirectories(source, "*", SearchOption.AllDirectories))
+        {
+            Directory.CreateDirectory(Path.Combine(target, Path.GetRelativePath(source, directory)));
+        }
+        foreach (string file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
+        {
+            File.Copy(file, Path.Combine(target, Path.GetRelativePath(source, file)), true);
+        }
+    }
+
+    /// <summary>
+    /// Unpacks a zip into <paramref name="target"/>, refusing entries that would land outside it. <paramref name="check"/>
+    /// looks at the unpacked files before they're moved into place (and can refuse them by throwing).
+    /// </summary>
+    public static void Unpack(string zip, string target, Action<string>? check = null)
     {
         string temp = target + ".unpacking";
         if (Directory.Exists(temp)) Directory.Delete(temp, true);
@@ -85,6 +184,15 @@ public sealed class PackageStore
                 Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
                 entry.ExtractToFile(destination, true);
             }
+        }
+        try
+        {
+            check?.Invoke(temp);
+        }
+        catch
+        {
+            Directory.Delete(temp, true);
+            throw;
         }
         if (Directory.Exists(target)) Directory.Delete(target, true);
         Directory.CreateDirectory(Path.GetDirectoryName(target)!);

@@ -67,6 +67,9 @@
                                             <Border Style="{StaticResource Badge}" BorderBrush="{StaticResource LightBlue}" Margin="10,0,0,0" Visibility="{Binding IsLocal, Converter={StaticResource Show}}">
                                                 <TextBlock Text="LOCAL" Style="{StaticResource BadgeText}" Foreground="{StaticResource LightBlue}" />
                                             </Border>
+                                            <Border Style="{StaticResource Badge}" BorderBrush="{StaticResource LightBlue}" Margin="10,0,0,0" Visibility="{Binding FromGitHub, Converter={StaticResource Show}}">
+                                                <TextBlock Text="GITHUB" Style="{StaticResource BadgeText}" Foreground="{StaticResource LightBlue}" />
+                                            </Border>
                                             <Border Style="{StaticResource Badge}" BorderBrush="{StaticResource LightGrey}" Margin="10,0,0,0" Visibility="{Binding IsDependency, Converter={StaticResource Show}}">
                                                 <TextBlock Text="DEPENDENCY" Style="{StaticResource BadgeText}" Foreground="{StaticResource TextSecondary}" />
                                             </Border>
@@ -169,6 +172,9 @@
                                             <TextBlock Text="{Binding Author}" FontSize="12" Opacity="0.7" Margin="8,0,0,0" VerticalAlignment="Center" />
                                             <Border Style="{StaticResource Badge}" Background="#E6101420" BorderBrush="{StaticResource Red}" Margin="8,0,0,0" Visibility="{Binding IsDeprecated, Converter={StaticResource Show}}">
                                                 <TextBlock Text="DEPRECATED" Style="{StaticResource BadgeText}" Foreground="{StaticResource Red}" />
+                                            </Border>
+                                            <Border Style="{StaticResource Badge}" Background="#E6101420" BorderBrush="{StaticResource LightBlue}" Margin="8,0,0,0" Visibility="{Binding LatestFromGitHub, Converter={StaticResource Show}}">
+                                                <TextBlock Text="GITHUB" Style="{StaticResource BadgeText}" Foreground="{StaticResource LightBlue}" />
                                             </Border>
                                         </StackPanel>
                                         <TextBlock Text="{Binding Description}" FontSize="13" Opacity="0.85" TextWrapping="Wrap" MaxHeight="38" TextTrimming="CharacterEllipsis" Margin="0,2,0,4" />

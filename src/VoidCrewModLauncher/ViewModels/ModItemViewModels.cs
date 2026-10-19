@@ -34,6 +34,10 @@ public partial class InstalledModViewModel : ObservableObject
     public string Description => Mod.Description;
     public bool IsLocal => Mod.IsLocal;
     public bool IsDependency => Mod.InstalledAsDependency;
+
+    /// <summary>The version you have came from the mod's GitHub releases (newer there than on Thunderstore).</summary>
+    public bool FromGitHub => Mod.GitHubRelease != null;
+
     public bool HasUpdate => UpdateVersion != null;
     public string UpdateText => UpdateVersion == null ? "" : $"UPDATE TO {UpdateVersion}";
     public string Initial => Name.Length > 0 ? Name[..1].ToUpperInvariant() : "?";
@@ -105,6 +109,9 @@ public partial class PackageViewModel : ObservableObject
     public string Author => "by " + Package.Author;
     public string Description => Package.Latest?.Description ?? "";
     public string LatestVersion => Package.Latest?.VersionNumber ?? "";
+
+    /// <summary>The newest version is a GitHub release (Thunderstore doesn't have it yet).</summary>
+    public bool LatestFromGitHub => Package.Latest?.GitHub != null;
     public string Downloads => Format.Count(Package.TotalDownloads);
     public long DownloadCount => Package.TotalDownloads;
     public int Rating => Package.RatingScore;

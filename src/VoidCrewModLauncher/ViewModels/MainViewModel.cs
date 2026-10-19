@@ -82,7 +82,15 @@ public partial class MainViewModel : ObservableObject
 
         _timer = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background, (_, _) => UpdateGameState(), _dispatcher);
         _timer.Start();
+        _playingTimer = new DispatcherTimer(PlayingCheckInterval, DispatcherPriority.Background, async (_, _) => await CheckWhilePlayingAsync(), _dispatcher);
+        _playingTimer.Start();
     }
+
+    /// <summary>How often the mods of a running game are checked for updates.</summary>
+    private static readonly TimeSpan PlayingCheckInterval = TimeSpan.FromMinutes(15);
+
+    private readonly DispatcherTimer? _playingTimer;
+    private bool _checkingWhilePlaying;
 
     public LauncherService Service { get; }
     public Dialogs Dialogs { get; }
@@ -386,7 +394,11 @@ public partial class MainViewModel : ObservableObject
         {
             AppLog.Warn($"Checking the installed mods on Thunderstore failed: {e.Message}");
         }
-        if (Service.Mods.Updates().Count == 0) return null;
+        if (Service.Mods.Updates().Count == 0)
+        {
+            await TellGameAboutUpdatesAsync();
+            return null;
+        }
 
         (List<string> Updated, List<string> Failed) result = (new List<string>(), new List<string>());
         await RunAsync("Updating mods", async () =>
@@ -397,7 +409,55 @@ public partial class MainViewModel : ObservableObject
         if (result.Updated.Count > 0) text = $"Updated {result.Updated.Count} mod{(result.Updated.Count == 1 ? "" : "s")}: {string.Join(", ", result.Updated)}.";
         if (result.Failed.Count > 0) text += $"{(text.Length > 0 ? " " : "")}Couldn't update {string.Join(", ", result.Failed)} (see the launcher log).";
         if (text.Length > 0) SetStatus(text);
+        await TellGameAboutUpdatesAsync();
         return text.Length > 0 ? text : null;
+    }
+
+    /// <summary>
+    /// While Void Crew runs from the launcher: looks for updates of the mods it was started with, installs them when mods
+    /// update automatically, and tells the player in the game. Every <see cref="PlayingCheckInterval"/>.
+    /// </summary>
+    private async Task CheckWhilePlayingAsync()
+    {
+        if (_checkingWhilePlaying || IsBusy || !Service.Bridge.IsConnected || Service.CurrentLaunch?.Mods is not { Count: > 0 } mods) return;
+        _checkingWhilePlaying = true;
+        try
+        {
+            if (Service.Settings.AutoUpdateMods)
+            {
+                await UpdateModsAsync();
+            }
+            else
+            {
+                await Service.FreshenAsync(mods.Where(m => !m.Local).Select(m => m.Id));
+                await TellGameAboutUpdatesAsync();
+            }
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            AppLog.Warn($"Checking the running game's mods for updates failed: {e.Message}");
+        }
+        finally
+        {
+            _checkingWhilePlaying = false;
+        }
+    }
+
+    /// <summary>
+    /// Tells the player in the game (one quiet line in their own chat) about updates that came out for its mods since it
+    /// started, so they know to restart it from the launcher. Each update is told once.
+    /// </summary>
+    private async Task TellGameAboutUpdatesAsync()
+    {
+        if (!Service.Bridge.IsConnected) return;
+        List<(string Name, string Version, bool Ready)> news = Service.NewUpdatesForRunningGame();
+        if (news.Count == 0) return;
+        string names = string.Join(", ", news.Select(n => $"{n.Name} {n.Version}"));
+        bool one = news.Count == 1;
+        string text = news.All(n => n.Ready)
+            ? $"Update ready: {names}. Restart Void Crew from the Mod Launcher to play with {(one ? "it" : "them")}."
+            : $"Update out: {names}. Update {(one ? "it" : "them")} in the Mod Launcher, then restart Void Crew from there.";
+        if (await Service.Bridge.SendAsync(new NotifyCommand { Text = text })) AppLog.Info("Told the game: " + text);
     }
 
     /// <summary>

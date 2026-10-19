@@ -56,6 +56,10 @@
                             <CheckBox DockPanel.Dock="Right" Style="{StaticResource Switch}" IsChecked="{Binding AutoUpdateMods}" VerticalAlignment="Center" />
                             <TextBlock Text="UPDATE MODS AUTOMATICALLY" Style="{StaticResource Label}" VerticalAlignment="Center" Margin="0" />
                         </DockPanel>
+                        <DockPanel Margin="0,16,0,0">
+                            <CheckBox DockPanel.Dock="Right" Style="{StaticResource Switch}" IsChecked="{Binding GitHubUpdates}" VerticalAlignment="Center" />
+                            <TextBlock Text="NEWER MOD VERSIONS FROM GITHUB" Style="{StaticResource Label}" VerticalAlignment="Center" Margin="0" />
+                        </DockPanel>
                         <Button Style="{StaticResource SmallButton}" Content="CHECK FOR UPDATES" Command="{Binding CheckForUpdatesCommand}" HorizontalAlignment="Left" Margin="0,16,0,0" />
                     </StackPanel>
                 </HeaderedContentControl>

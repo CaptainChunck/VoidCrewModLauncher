@@ -177,6 +177,12 @@ public static class Previews
         }
 
         Add("Captain_Chuncks_Mods-Void_Crew_VR_UI_Fix", true);
+        // A version newer on GitHub than on Thunderstore, for the GITHUB badge.
+        service.Library.Update("Captain_Chuncks_Mods-Void_Crew_VR_UI_Fix", m =>
+        {
+            m.Version = "3.15.0";
+            m.GitHubRelease = "https://github.com/CaptainChunck/VoidCrewVRUIFix/releases/tag/v3.15.0";
+        });
         Add("Captain_Chuncks_Mods-Ship_Customizer", true);
         Add("Captain_Chuncks_Mods-Void_Crew_Fleet", true);
         Add("NihilityShift-VoidManager", true, true);

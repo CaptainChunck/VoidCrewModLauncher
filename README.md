@@ -46,6 +46,12 @@ it hosts lobbies with your mods in one click.
   ratings, the mod's README, and one-click install with dependencies.
 - **Updates**: at start (and on REFRESH) installed mods update to their newest versions. Each mod is checked with
   Thunderstore directly, because Thunderstore's community list can be an hour or more behind.
+  - When a mod's Thunderstore page links its **GitHub repo**, the repo's latest release is checked too, and used when
+    it's newer: its package zip (it must say it's that mod at that version and match GitHub's checksum), or its plugin
+    DLLs put into the Thunderstore files. These versions show a GITHUB badge, and players joining your lobby get the
+    same release.
+  - **While you play**, the launcher checks the game's mods every 15 minutes. When one gets an update, one quiet line
+    in your own text chat says to restart Void Crew from the launcher; nothing pops up or makes a sound.
 
 ![Mod manager: installed mods with on/off switches](docs/screenshots/mod-manager-installed.png)
 

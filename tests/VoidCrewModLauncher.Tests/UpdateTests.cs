@@ -17,7 +17,12 @@ public sealed class FakeHttp : HttpMessageHandler
 {
     private readonly Dictionary<string, (HttpStatusCode Status, byte[] Body)> _routes = new(StringComparer.OrdinalIgnoreCase);
 
+    private readonly Dictionary<string, string> _etags = new(StringComparer.OrdinalIgnoreCase);
+
     public List<string> Requests { get; } = new();
+
+    /// <summary>The If-None-Match header of the last request for each URL.</summary>
+    public Dictionary<string, string> IfNoneMatch { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     public FakeHttp On(string url, string body, HttpStatusCode status = HttpStatusCode.OK) => On(url, Encoding.UTF8.GetBytes(body), status);
 
@@ -27,13 +32,28 @@ public sealed class FakeHttp : HttpMessageHandler
         return this;
     }
 
+    /// <summary>Answers with this ETag, and 304 Not Modified when a request already has it.</summary>
+    public FakeHttp WithETag(string url, string etag)
+    {
+        _etags[url] = etag;
+        return this;
+    }
+
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         string url = request.RequestUri!.ToString();
-        lock (Requests) Requests.Add(url);
+        string? sent = request.Headers.TryGetValues("If-None-Match", out IEnumerable<string>? values) ? values.FirstOrDefault() : null;
+        lock (Requests)
+        {
+            Requests.Add(url);
+            if (sent != null) IfNoneMatch[url] = sent;
+        }
+        _etags.TryGetValue(url, out string? etag);
+        if (etag != null && sent == etag) return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotModified));
         HttpResponseMessage response = _routes.TryGetValue(url, out var route)
             ? new HttpResponseMessage(route.Status) { Content = new ByteArrayContent(route.Body) }
             : new HttpResponseMessage(HttpStatusCode.NotFound) { Content = new StringContent("{\"detail\":\"Not found.\"}") };
+        if (etag != null) response.Headers.ETag = System.Net.Http.Headers.EntityTagHeaderValue.Parse(etag);
         return Task.FromResult(response);
     }
 
@@ -41,6 +61,21 @@ public sealed class FakeHttp : HttpMessageHandler
     {
         using var memory = new MemoryStream();
         using (var gzip = new GZipStream(memory, CompressionLevel.Optimal, true)) gzip.Write(Encoding.UTF8.GetBytes(text));
+        return memory.ToArray();
+    }
+
+    /// <summary>A zip with these files.</summary>
+    public static byte[] Zip(params (string Name, string Content)[] files)
+    {
+        using var memory = new MemoryStream();
+        using (var zip = new ZipArchive(memory, ZipArchiveMode.Create, true))
+        {
+            foreach ((string name, string content) in files)
+            {
+                using StreamWriter writer = new(zip.CreateEntry(name).Open());
+                writer.Write(content);
+            }
+        }
         return memory.ToArray();
     }
 }

@@ -20,4 +20,7 @@
   <ItemGroup>
     <EmbeddedResource Include="..\VoidCrewModLauncher.Bridge\bin\$(Configuration)\net48\VoidCrewModLauncher.Bridge.dll" LogicalName="VoidCrewModLauncher.Bridge.dll" Visible="false" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="VoidCrewModLauncher.Tests" />
+  </ItemGroup>
 </Project>

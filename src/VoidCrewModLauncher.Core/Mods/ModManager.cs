@@ -124,6 +124,7 @@ public sealed class ModManager
         Description = version.Description,
         WebsiteUrl = string.IsNullOrEmpty(version.WebsiteUrl) ? package.PackageUrl : version.WebsiteUrl,
         IconUrl = version.Icon,
+        GitHubRelease = version.GitHub?.ReleaseUrl,
         Dependencies = version.Dependencies.ToList(),
         Categories = package.Categories.ToList(),
         PluginGuids = PluginScanner.ScanDirectory(folder).Select(p => p.Guid).Distinct().ToList(),

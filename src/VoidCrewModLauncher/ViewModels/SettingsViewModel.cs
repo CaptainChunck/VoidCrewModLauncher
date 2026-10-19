@@ -97,6 +97,17 @@ public partial class SettingsViewModel : ObservableObject
         }
     }
 
+    public bool GitHubUpdates
+    {
+        get => Service.Settings.GitHubUpdates;
+        set
+        {
+            Service.Settings.GitHubUpdates = value;
+            Service.SaveSettings();
+            OnPropertyChanged();
+        }
+    }
+
     /// <summary>A new launcher from GitHub (installed straight away), then updates for the installed mods.</summary>
     [RelayCommand]
     private async Task CheckForUpdates()

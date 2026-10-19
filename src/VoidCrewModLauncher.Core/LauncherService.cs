@@ -1,5 +1,6 @@
 using VoidCrewModLauncher.Core.Bridge;
 using VoidCrewModLauncher.Core.Game;
+using VoidCrewModLauncher.Core.GitHub;
 using VoidCrewModLauncher.Core.Lobbies;
 using VoidCrewModLauncher.Core.Mods;
 using VoidCrewModLauncher.Core.Steam;
@@ -36,15 +37,16 @@ public sealed class DoorstopConsentNeededException(string gameDirectory)
 /// </summary>
 public sealed class LauncherService : IDisposable
 {
-    /// <param name="thunderstoreHandler">Answers Thunderstore's requests instead of the internet (tests).</param>
-    public LauncherService(AppPaths paths, HttpMessageHandler? thunderstoreHandler = null)
+    /// <param name="httpHandler">Answers Thunderstore's and GitHub's requests instead of the internet (tests).</param>
+    public LauncherService(AppPaths paths, HttpMessageHandler? httpHandler = null)
     {
         Paths = paths;
         paths.EnsureCreated();
         Settings = LauncherSettings.Load(paths);
-        Thunderstore = new ThunderstoreClient(paths, thunderstoreHandler);
+        Thunderstore = new ThunderstoreClient(paths, httpHandler);
+        GitHub = new GitHubClient(paths, httpHandler);
         Library = new ModLibrary(paths);
-        Store = new PackageStore(paths, Thunderstore);
+        Store = new PackageStore(paths, Thunderstore, GitHub);
         Mods = new ModManager(Library, Store);
         Planner = new JoinPlanner(Mods);
         Runtime = new RuntimeBuilder(paths);
@@ -55,6 +57,7 @@ public sealed class LauncherService : IDisposable
     public AppPaths Paths { get; }
     public LauncherSettings Settings { get; }
     public ThunderstoreClient Thunderstore { get; }
+    public GitHubClient GitHub { get; }
     public ModLibrary Library { get; }
     public PackageStore Store { get; }
     public ModManager Mods { get; }
@@ -108,13 +111,30 @@ public sealed class LauncherService : IDisposable
     {
         List<TsPackage> packages = await Thunderstore.GetPackagesAsync(force, cancel);
         var index = new PackageIndex(packages);
-        if (!Thunderstore.IsOffline)
-        {
-            IEnumerable<string> installed = Library.Mods.Where(m => m.Source == ModSource.Thunderstore).Select(m => m.Id);
-            index = index.Merge(await Thunderstore.GetCurrentAsync(installed, cancel));
-        }
+        List<string> installed = Library.Mods.Where(m => m.Source == ModSource.Thunderstore).Select(m => m.Id).ToList();
+        if (!Thunderstore.IsOffline) index = index.Merge(await Thunderstore.GetCurrentAsync(installed, cancel));
+        index = index.Merge(await NewerOnGitHubAsync(installed.Select(index.Find).OfType<TsPackage>(), cancel));
         Mods.Index = index;
         PackagesChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// For packages whose Thunderstore page names a GitHub repo: the package with the repo's newest release added, when
+    /// that release is newer than everything Thunderstore has. Off with Settings.GitHubUpdates.
+    /// </summary>
+    private async Task<List<TsPackage>> NewerOnGitHubAsync(IEnumerable<TsPackage> packages, CancellationToken cancel)
+    {
+        var newer = new List<TsPackage>();
+        if (!Settings.GitHubUpdates) return newer;
+        foreach (TsPackage package in packages)
+        {
+            if (package.LatestOnThunderstore is not { } newest || GitHubRepo.Parse(newest.WebsiteUrl) is not { } repo) continue;
+            TsVersion? release = await GitHub.GetLatestReleaseAsync(repo, package, cancel);
+            if (release == null || VersionNumber.Compare(release.VersionNumber, newest.VersionNumber) <= 0) continue;
+            AppLog.Info($"{package.FullName} {release.VersionNumber} is on GitHub ({repo}); Thunderstore has {newest.VersionNumber}.");
+            newer.Add(package.WithVersions(new[] { release }));
+        }
+        return newer;
     }
 
     /// <summary>
@@ -125,7 +145,8 @@ public sealed class LauncherService : IDisposable
     {
         var asked = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var fresh = new List<TsPackage>();
-        List<string> next = ids.Where(id => !string.IsNullOrEmpty(id)).ToList();
+        List<string> wanted = ids.Where(id => !string.IsNullOrEmpty(id)).ToList();
+        List<string> next = wanted;
         while (next.Count > 0 && asked.Count < 64)
         {
             List<TsPackage> found = await Thunderstore.GetCurrentAsync(next.Where(asked.Add), cancel);
@@ -137,6 +158,8 @@ public sealed class LauncherService : IDisposable
                             && (known.Find(d.Id) is not { } package || VersionNumber.Compare(package.Latest?.VersionNumber, d.Version) < 0))
                 .Select(d => d.Id).ToList();
         }
+        PackageIndex withFresh = Mods.Index.Merge(fresh);
+        fresh.AddRange(await NewerOnGitHubAsync(wanted.Select(withFresh.Find).OfType<TsPackage>(), cancel));
         Merge(fresh);
     }
 
@@ -150,9 +173,14 @@ public sealed class LauncherService : IDisposable
         foreach (LobbyMod mod in lobby.Mods.Where(m => !m.Local && m.PackageVersion == null && m.PackageId != null))
         {
             TsVersion? exact = await Thunderstore.GetVersionAsync(mod.PackageId!, mod.Version, cancel);
-            if (exact == null) continue;
             TsPackage? package = mod.Package ?? Index.Find(mod.PackageId) ?? (await Thunderstore.GetCurrentAsync(new[] { mod.PackageId! }, cancel)).FirstOrDefault();
-            if (package != null) fresh.Add(package.WithVersions(new[] { exact }));
+            if (package == null) continue;
+            // A host who got a newer version from the mod's GitHub releases: the same release.
+            if (exact == null && Settings.GitHubUpdates && GitHubRepo.Parse(package.LatestOnThunderstore?.WebsiteUrl) is { } repo)
+            {
+                exact = await GitHub.GetReleaseAsync(repo, package, mod.Version, cancel);
+            }
+            if (exact != null) fresh.Add(package.WithVersions(new[] { exact }));
         }
         return Merge(fresh);
     }
@@ -316,7 +344,7 @@ public sealed class LauncherService : IDisposable
         Report("Preparing BepInEx and the mods");
         await Task.Run(() => Runtime.Build(bepInExPack, mods, launch, Settings.ShowBepInExConsole), cancel);
         GameProcess.Start(game, Paths.Preloader, Settings.LaunchThroughSteam);
-        CurrentLaunch = launch;
+        UseLaunch(launch);
         LastLaunchUtc = DateTime.UtcNow;
         LastLaunchMode = mode;
         Report(mode switch
@@ -368,13 +396,74 @@ public sealed class LauncherService : IDisposable
         {
             AppLog.Warn($"Could not read {Paths.RuntimeLaunchFile}: {e.Message}");
         }
-        CurrentLaunch = file?.LaunchId == hello.LaunchId ? file : null;
+        UseLaunch(file?.LaunchId == hello.LaunchId ? file : null);
+    }
+
+    /// <summary>The running game was started with <paramref name="launch"/> (tests use this without starting it).</summary>
+    internal void UseLaunch(LaunchFile? launch)
+    {
+        CurrentLaunch = launch;
+        RememberKnownVersions();
+    }
+
+    // ---------------------------------------------------------------- updates while the game runs
+
+    /// <summary>For each mod of the running game, the newest version known when it started: later ones are news.</summary>
+    private Dictionary<string, string> _knownAtLaunch = new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly object _knownGate = new();
+
+    private void RememberKnownVersions()
+    {
+        lock (_knownGate)
+        {
+            _knownAtLaunch = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (LaunchMod mod in CurrentLaunch?.Mods ?? new List<LaunchMod>())
+            {
+                if (!mod.Local) _knownAtLaunch[mod.Id] = Newest(mod.Version, NewestKnown(mod.Id));
+            }
+        }
+    }
+
+    /// <summary>The newest version of a mod the launcher knows of: yours, or on Thunderstore or GitHub.</summary>
+    private string? NewestKnown(string id)
+    {
+        InstalledMod? mine = Library.Find(id);
+        string? yours = mine is { IsLocal: false } ? mine.Version : null;
+        return Newest(yours, Index.Find(id)?.Latest?.VersionNumber);
+    }
+
+    private static string Newest(string? a, string? b) =>
+        string.IsNullOrEmpty(a) ? b ?? "" : string.IsNullOrEmpty(b) ? a : VersionNumber.Compare(a, b) >= 0 ? a : b;
+
+    /// <summary>
+    /// Updates that came out while the game runs, for the mods it was started with (each one once). Ready means it is
+    /// already downloaded and on in your mods, so starting the game from the launcher loads it.
+    /// </summary>
+    public List<(string Name, string Version, bool Ready)> NewUpdatesForRunningGame()
+    {
+        var news = new List<(string, string, bool)>();
+        if (CurrentLaunch?.Mods == null) return news;
+        lock (_knownGate)
+        {
+            foreach (LaunchMod running in CurrentLaunch.Mods.Where(m => !m.Local))
+            {
+                string? newest = NewestKnown(running.Id);
+                string known = _knownAtLaunch.TryGetValue(running.Id, out string? k) ? k : running.Version;
+                if (string.IsNullOrEmpty(newest) || VersionNumber.Compare(newest, known) <= 0 || VersionNumber.Compare(newest, running.Version) <= 0) continue;
+                _knownAtLaunch[running.Id] = newest;
+                bool ready = Library.Find(running.Id) is { } mine && VersionNumber.Same(mine.Version, newest) && Store.Has(mine.Id, mine.Version);
+                news.Add((running.Name, newest, ready));
+            }
+        }
+        return news;
     }
 
     public void Dispose()
     {
         Bridge.Dispose();
         Thunderstore.Dispose();
+        GitHub.Dispose();
     }
 }
 

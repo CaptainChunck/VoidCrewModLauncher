@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using VoidCrewModLauncher.Core.GitHub;
 
 namespace VoidCrewModLauncher.Core.Thunderstore;
 
@@ -19,8 +20,12 @@ public sealed class TsPackage
     public List<string> Categories { get; set; } = new();
     public List<TsVersion> Versions { get; set; } = new();
 
+    /// <summary>The newest version, from Thunderstore or, when it is newer, from the mod's GitHub releases.</summary>
     [JsonIgnore]
     public TsVersion? Latest => Versions.Count == 0 ? null : Versions.MaxBy(v => v.VersionNumber, VersionNumber.Comparer);
+
+    [JsonIgnore]
+    public TsVersion? LatestOnThunderstore => Versions.Where(v => v.GitHub == null).MaxBy(v => v.VersionNumber, VersionNumber.Comparer);
 
     [JsonIgnore]
     public long TotalDownloads => Versions.Sum(v => (long)v.Downloads);
@@ -59,6 +64,10 @@ public sealed class TsVersion
     public string WebsiteUrl { get; set; } = "";
     public bool IsActive { get; set; }
     public long FileSize { get; set; }
+
+    /// <summary>Set when this version comes from the mod's GitHub releases instead of Thunderstore.</summary>
+    [JsonIgnore]
+    public GitHubSource? GitHub { get; set; }
 }
 
 /// <summary>A Thunderstore dependency string: Namespace-Name-1.2.3.</summary>

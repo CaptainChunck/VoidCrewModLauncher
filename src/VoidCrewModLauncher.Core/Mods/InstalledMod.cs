@@ -42,6 +42,9 @@ public sealed class InstalledMod
     public string? WebsiteUrl { get; set; }
     public string? IconUrl { get; set; }
 
+    /// <summary>The GitHub release <see cref="Version"/> came from, when it was newer there than on Thunderstore.</summary>
+    public string? GitHubRelease { get; set; }
+
     /// <summary>Thunderstore dependency strings of <see cref="Version"/>.</summary>
     public List<string> Dependencies { get; set; } = new();
 

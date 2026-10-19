@@ -30,6 +30,7 @@ namespace VoidCrewModLauncher.Protocol
         public const string SetRegion = "setRegion";
         public const string Refresh = "refresh";
         public const string Quit = "quit";
+        public const string Notify = "notify";
     }
 
     public static class BridgeDefaults
@@ -231,6 +232,13 @@ namespace VoidCrewModLauncher.Protocol
     {
         public SetRegionCommand() { Type = MessageTypes.SetRegion; }
         public string Region { get; set; }
+    }
+
+    /// <summary>A line for the player while they play (mod updates): shown quietly in their own text chat only.</summary>
+    public class NotifyCommand : Message
+    {
+        public NotifyCommand() { Type = MessageTypes.Notify; }
+        public string Text { get; set; }
     }
 
     // ------------------------------------------------------------------ launch.json

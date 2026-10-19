@@ -30,6 +30,9 @@ public sealed class LauncherSettings
     /// <summary>At start and on refresh, update installed Thunderstore mods to their newest versions.</summary>
     public bool AutoUpdateMods { get; set; } = true;
 
+    /// <summary>For mods whose Thunderstore page names a GitHub repo, use the repo's newest release when it's newer.</summary>
+    public bool GitHubUpdates { get; set; } = true;
+
     /// <summary>The launcher version the self-update last tried, and when: a release that won't install isn't retried in a loop.</summary>
     public string? UpdateTriedVersion { get; set; }
 

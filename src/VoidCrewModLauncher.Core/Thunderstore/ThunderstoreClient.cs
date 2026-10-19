@@ -43,7 +43,7 @@ public sealed class ThunderstoreClient : IDisposable
     public ThunderstoreClient(AppPaths paths, HttpMessageHandler? handler = null)
     {
         _paths = paths;
-        _http = handler == null ? new HttpClient() : new HttpClient(handler);
+        _http = handler == null ? new HttpClient() : new HttpClient(handler, disposeHandler: false);
         _http.Timeout = TimeSpan.FromMinutes(5);
         _http.DefaultRequestHeaders.UserAgent.ParseAdd(AppInfo.UserAgent);
     }
