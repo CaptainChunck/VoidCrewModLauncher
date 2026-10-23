@@ -262,6 +262,10 @@ public partial class MainViewModel : ObservableObject
         });
     }
 
+    /// <summary>voidcrewmod.com in the browser.</summary>
+    [RelayCommand]
+    private void OpenWebsite() => Format.Open(AppInfo.WebsiteUrl);
+
     [RelayCommand(CanExecute = nameof(GameRunning))]
     private void FocusGame()
     {

@@ -20,7 +20,7 @@ namespace VoidCrewModLauncher.Bridge
     public class Plugin : BaseUnityPlugin
     {
         public const string Name = "Void Crew Mod Launcher Bridge";
-        public const string Version = "0.5.0";
+        public const string Version = "0.6.0";
 
         private void Awake()
         {

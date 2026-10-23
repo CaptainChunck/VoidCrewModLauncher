@@ -112,6 +112,9 @@ public partial class PackageViewModel : ObservableObject
 
     /// <summary>The newest version is a GitHub release (Thunderstore doesn't have it yet).</summary>
     public bool LatestFromGitHub => Package.Latest?.GitHub != null;
+
+    /// <summary>The newest version comes from voidcrewmod.com.</summary>
+    public bool LatestFromWebsite => Package.LatestFromWebsite;
     public string Downloads => Format.Count(Package.TotalDownloads);
     public long DownloadCount => Package.TotalDownloads;
     public int Rating => Package.RatingScore;

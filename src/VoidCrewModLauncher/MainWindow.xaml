@@ -130,6 +130,7 @@
                             </Ellipse.Style>
                         </Ellipse>
                     </StackPanel>
+                    <Button Style="{StaticResource HexButton}" Content="WEBSITE" Command="{Binding OpenWebsiteCommand}" Margin="0,0,6,0" />
                     <Button Style="{StaticResource PrimaryButton}" Content="PLAY" Command="{Binding PlayCommand}" MinWidth="128" FontSize="15"
                             Visibility="{Binding GameRunning, Converter={StaticResource Hide}}" />
                     <Button Style="{StaticResource HexButton}" Content="SHOW GAME" Command="{Binding FocusGameCommand}" Margin="0,0,6,0"

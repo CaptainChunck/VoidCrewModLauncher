@@ -56,6 +56,7 @@ public sealed class PackageStore
             string zip = await _thunderstore.DownloadAsync(version, progress, cancel);
             try
             {
+                if (version.Sha256 != null) await CheckSha256Async(zip, version, cancel);
                 await Task.Run(() => Unpack(zip, target), cancel);
             }
             finally
@@ -142,6 +143,17 @@ public sealed class PackageStore
         if (root.TryGetProperty("dependencies", out JsonElement dependencies) && dependencies.ValueKind == JsonValueKind.Array)
         {
             version.Dependencies = dependencies.EnumerateArray().Where(d => d.ValueKind == JsonValueKind.String).Select(d => d.GetString()!).ToList();
+        }
+    }
+
+    /// <summary>A download whose source lists its SHA-256 (voidcrewmod.com) must match it.</summary>
+    private static async Task CheckSha256Async(string file, TsVersion version, CancellationToken cancel)
+    {
+        await using FileStream stream = File.OpenRead(file);
+        string actual = Convert.ToHexString(await System.Security.Cryptography.SHA256.HashDataAsync(stream, cancel)).ToLowerInvariant();
+        if (actual != version.Sha256)
+        {
+            throw new InvalidDataException($"{version.FullName} doesn't match the checksum its site lists; not installing it.");
         }
     }
 

@@ -27,6 +27,23 @@ public sealed class PackageIndex
     public static PackageIndex Empty { get; } = new(Array.Empty<TsPackage>());
 
     /// <summary>
+    /// This index with <paramref name="preferred"/> packages (voidcrewmod.com's) put first: a package both have takes the
+    /// preferred one's details and versions, keeping only versions the preferred source doesn't have; new ones are added.
+    /// </summary>
+    public PackageIndex Prefer(IReadOnlyCollection<TsPackage> preferred)
+    {
+        if (preferred.Count == 0) return this;
+        var byId = preferred.Where(p => p.Versions.Count > 0).GroupBy(p => p.FullName, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+        TsPackage Combine(TsPackage mine, TsPackage? other) => other == null
+            ? mine
+            : mine.WithVersions(other.Versions.Where(v => mine.Version(v.VersionNumber) == null));
+        var result = All.Select(p => byId.TryGetValue(p.FullName, out TsPackage? site) ? Combine(site, p) : p).ToList();
+        result.AddRange(byId.Values.Where(p => !_byId.ContainsKey(p.FullName)));
+        return new PackageIndex(result);
+    }
+
+    /// <summary>
     /// This index with up-to-date packages merged in (from Thunderstore's per-package API): versions it doesn't have are
     /// added to their package, and packages it doesn't have are added. Returns this same index when nothing is new.
     /// </summary>

@@ -176,6 +176,9 @@
                                             <Border Style="{StaticResource Badge}" Background="#E6101420" BorderBrush="{StaticResource LightBlue}" Margin="8,0,0,0" Visibility="{Binding LatestFromGitHub, Converter={StaticResource Show}}">
                                                 <TextBlock Text="GITHUB" Style="{StaticResource BadgeText}" Foreground="{StaticResource LightBlue}" />
                                             </Border>
+                                            <Border Style="{StaticResource Badge}" Background="#E6101420" BorderBrush="{StaticResource Orange}" Margin="8,0,0,0" Visibility="{Binding LatestFromWebsite, Converter={StaticResource Show}}">
+                                                <TextBlock Text="WEBSITE" Style="{StaticResource BadgeText}" Foreground="{StaticResource Orange}" />
+                                            </Border>
                                         </StackPanel>
                                         <TextBlock Text="{Binding Description}" FontSize="13" Opacity="0.85" TextWrapping="Wrap" MaxHeight="38" TextTrimming="CharacterEllipsis" Margin="0,2,0,4" />
                                         <ItemsControl ItemsSource="{Binding Categories}">

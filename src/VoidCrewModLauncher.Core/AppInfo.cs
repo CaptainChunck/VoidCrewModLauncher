@@ -13,6 +13,9 @@ public static class AppInfo
     public const string ThunderstoreCommunity = "void-crew";
     public const string RepositoryUrl = "https://github.com/CaptainChunck/VoidCrewModLauncher";
 
+    /// <summary>The Void Crew mod site: its mods come before Thunderstore's.</summary>
+    public const string WebsiteUrl = "https://voidcrewmod.com";
+
     public static string Version { get; } = ReadVersion();
 
     public static string UserAgent => $"VoidCrewModLauncher/{Version} (+{RepositoryUrl})";

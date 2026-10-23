@@ -31,6 +31,10 @@ public sealed class TsPackage
     [JsonIgnore]
     public bool IsGitHubOnly { get; init; }
 
+    /// <summary>The newest version comes from voidcrewmod.com.</summary>
+    [JsonIgnore]
+    public bool LatestFromWebsite => Latest?.FromWebsite == true;
+
     [JsonIgnore]
     public long TotalDownloads => Versions.Sum(v => (long)v.Downloads);
 
@@ -72,6 +76,13 @@ public sealed class TsVersion
     /// <summary>Set when this version comes from the mod's GitHub releases instead of Thunderstore.</summary>
     [JsonIgnore]
     public GitHubSource? GitHub { get; set; }
+
+    /// <summary>The download's SHA-256 (lower-case hex), when the source lists it (voidcrewmod.com does); checked after download.</summary>
+    public string? Sha256 { get; set; }
+
+    /// <summary>This version comes from voidcrewmod.com, which the launcher prefers over Thunderstore.</summary>
+    [JsonIgnore]
+    public bool FromWebsite { get; set; }
 }
 
 /// <summary>A Thunderstore dependency string: Namespace-Name-1.2.3.</summary>

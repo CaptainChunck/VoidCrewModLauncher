@@ -125,6 +125,16 @@ Windows 10 or 11 (64-bit); no .NET install needed. Windows may warn about an unr
 | `...\runtime\BepInEx\LogOutput.log` | The game's BepInEx log (SETTINGS > GAME LOG) |
 | `...\logs\launcher.log` | The launcher's log (SETTINGS > LAUNCHER LOG) |
 
+## voidcrewmod.com
+
+The WEBSITE button opens [voidcrewmod.com](https://voidcrewmod.com). Its mods come before Thunderstore's: the launcher
+reads `https://voidcrewmod.com/api/v1/package/`, the same JSON as Thunderstore's v1 package list (snake_case `name`,
+`full_name`, `owner`, `package_url`, `categories`, `versions` with `version_number`, `download_url`, `dependencies`,
+`description`, `icon`, `website_url`, `date_created`, `file_size`), where each version can add `sha256` (checked after
+download). Downloads are Thunderstore-style zips (manifest.json at the root). For a mod on both, the site's versions
+win; the rest comes from Thunderstore. When the site can't be reached, the last list read (or Thunderstore alone) is
+used. `VCML_SITE_URL` points the launcher at a test copy of the site.
+
 ## For websites: install links
 
 A "download with the Mod Launcher" button is a link the launcher handles (the setup registers it for the user):

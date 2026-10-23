@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0
+
+- **voidcrewmod.com first:** once the site's mod list is up, its mods come before Thunderstore's. For a mod on both,
+  the site's details, versions and downloads are used (each download checked against the SHA-256 the site lists), and
+  Thunderstore fills in the rest. Mods only on the site show in MODS with a WEBSITE badge. While the site is down or
+  not live yet, Thunderstore covers everything as before.
+- **WEBSITE button** at the top of the launcher opens voidcrewmod.com.
+
 ## 0.5.0
 
 - **Install from a website:** voidcrewmod:// links open the launcher and install that mod, with what it needs, after

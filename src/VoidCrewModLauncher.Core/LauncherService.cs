@@ -5,6 +5,7 @@ using VoidCrewModLauncher.Core.Lobbies;
 using VoidCrewModLauncher.Core.Mods;
 using VoidCrewModLauncher.Core.Steam;
 using VoidCrewModLauncher.Core.Thunderstore;
+using VoidCrewModLauncher.Core.Website;
 using VoidCrewModLauncher.Protocol;
 
 namespace VoidCrewModLauncher.Core;
@@ -45,6 +46,7 @@ public sealed class LauncherService : IDisposable
         Settings = LauncherSettings.Load(paths);
         Thunderstore = new ThunderstoreClient(paths, httpHandler);
         GitHub = new GitHubClient(paths, httpHandler);
+        Website = new WebsiteClient(paths, httpHandler);
         Library = new ModLibrary(paths);
         Store = new PackageStore(paths, Thunderstore, GitHub);
         Mods = new ModManager(Library, Store);
@@ -58,6 +60,7 @@ public sealed class LauncherService : IDisposable
     public LauncherSettings Settings { get; }
     public ThunderstoreClient Thunderstore { get; }
     public GitHubClient GitHub { get; }
+    public WebsiteClient Website { get; }
     public ModLibrary Library { get; }
     public PackageStore Store { get; }
     public ModManager Mods { get; }
@@ -109,8 +112,21 @@ public sealed class LauncherService : IDisposable
     /// </summary>
     public async Task RefreshPackagesAsync(bool force, CancellationToken cancel = default)
     {
-        List<TsPackage> packages = await Thunderstore.GetPackagesAsync(force, cancel);
-        var index = new PackageIndex(packages);
+        Task<List<TsPackage>> siteTask = Website.GetPackagesAsync(force, cancel);
+        List<TsPackage> packages;
+        try
+        {
+            packages = await Thunderstore.GetPackagesAsync(force, cancel);
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            // Thunderstore is down: voidcrewmod.com's mods still work when it answered.
+            if ((await siteTask).Count == 0) throw;
+            AppLog.Warn($"Thunderstore couldn't be reached ({e.Message}); using voidcrewmod.com's mods only.");
+            packages = new List<TsPackage>();
+        }
+        // voidcrewmod.com first: its versions and downloads win over Thunderstore's for a mod both have.
+        var index = new PackageIndex(packages).Prefer(await siteTask);
         List<string> installed = Library.Mods.Where(m => m.Source == ModSource.Thunderstore).Select(m => m.Id).ToList();
         if (!Thunderstore.IsOffline) index = index.Merge(await Thunderstore.GetCurrentAsync(installed, cancel));
         index = index.Merge(await NewerOnGitHubAsync(installed.Select(index.Find).OfType<TsPackage>(), cancel));
@@ -565,6 +581,7 @@ public sealed class LauncherService : IDisposable
         Bridge.Dispose();
         Thunderstore.Dispose();
         GitHub.Dispose();
+        Website.Dispose();
     }
 }
 
