@@ -111,7 +111,6 @@ Windows 10 or 11 (64-bit); no .NET install needed. Windows may warn about an unr
 - **Uninstall:** Windows **Settings > Apps > Installed apps > Void Crew Mod Launcher > Uninstall**. It asks whether to
   delete your downloaded mods and settings too, and removes BepInEx's loader from the game folder if the launcher added it.
 - **Portable:** put an empty `portable.txt` next to the exe (or start it with `--portable`) and it runs where it is.
-- **Thunderstore:** the same setup is in the `Void_Crew_Mod_Launcher-<version>.zip` package.
 
 **VR players (Rai Pal):** on MOD MANAGER > INSTALLED, use IMPORT FROM BEPINEX and pick Rai Pal's BepInEx folder for Void Crew
 (the launcher suggests it). UUVR and your VR mods then come along to every lobby you join.
@@ -143,7 +142,7 @@ Windows 10 or 11 (64-bit); no .NET install needed. Windows may warn about an unr
 - **Build and test:** `powershell -ExecutionPolicy Bypass -File tools\build-and-test.ps1 -VoidCrewDir "<game folder>" -BepInExDir "<BepInEx folder>"`
   builds everything, runs the offline tests and checks that every game method the bridge uses is still in the game.
 - **Release:** `powershell -ExecutionPolicy Bypass -File tools\package.ps1` makes `dist\VoidCrewModLauncher-Setup.exe` (the
-  one-click install) and `dist\Void_Crew_Mod_Launcher-<version>.zip` (the Thunderstore upload).
+  one-click install).
 - **Screenshots:** `powershell -ExecutionPolicy Bypass -File tools\screenshots.ps1` redraws `docs\screenshots`.
 - **Look at the pages without the game:** `VoidCrewModLauncher.exe --render-previews <folder>` draws every page with
   sample lobbies into PNGs.

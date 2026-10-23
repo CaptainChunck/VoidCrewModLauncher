@@ -1,6 +1,6 @@
 <Project>
   <!-- One version for the launcher, its core and the bridge plugin. tools\package.ps1 checks that
-       thunderstore\manifest.json and the bridge's BepInPlugin version match it. -->
+       the bridge's BepInPlugin version matches it. -->
   <PropertyGroup>
     <Version>0.4.0</Version>
   </PropertyGroup>
