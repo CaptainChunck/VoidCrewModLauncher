@@ -56,9 +56,17 @@ public partial class App : Application
             return;
         }
 
+        // A voidcrewmod:// link (a website's "download with the Mod Launcher") starts the launcher with the link.
+        string? link = LauncherLinks.FindIn(e.Args);
         _single = new Mutex(true, "VoidCrewModLauncher-" + Environment.UserName, out bool first);
         if (!first)
         {
+            // The launcher is open: it handles the link.
+            if (link != null && LinkPipe.SendAsync(link).GetAwaiter().GetResult())
+            {
+                Shutdown();
+                return;
+            }
             MessageBox.Show("The Void Crew Mod Launcher is already open.", AppInfo.Name, MessageBoxButton.OK, MessageBoxImage.Information);
             Shutdown();
             return;
@@ -83,7 +91,31 @@ public partial class App : Application
         dialogs.Owner = window;
         MainWindow = window;
         window.Show();
-        _ = model.StartAsync(Argument(e.Args, Installer.UpdatedArgument));
+        _links = new LinkPipe();
+        _links.Start(received => Dispatcher.BeginInvoke(() => _ = model.HandleLinkAsync(received)));
+        RegisterLinks(locations);
+        _ = model.StartAsync(Argument(e.Args, Installer.UpdatedArgument), link);
+    }
+
+    private LinkPipe? _links;
+
+    /// <summary>
+    /// voidcrewmod:// links open this launcher: the setup registers them; a copy that was never set up (portable)
+    /// registers itself when nothing else has.
+    /// </summary>
+    private static void RegisterLinks(InstallLocations locations)
+    {
+        if (!Installer.IsPublishedBuild || locations.ClassesKey == null || Environment.ProcessPath is not { } exe) return;
+        try
+        {
+            bool installed = string.Equals(Path.GetFullPath(exe), Path.GetFullPath(locations.InstalledExe), StringComparison.OrdinalIgnoreCase);
+            using Microsoft.Win32.RegistryKey? existing = Microsoft.Win32.Registry.CurrentUser.OpenSubKey($@"{locations.ClassesKey}\{LauncherLinks.Scheme}");
+            if ((installed || existing == null) && !LauncherLinks.IsRegistered(exe, locations.ClassesKey)) LauncherLinks.Register(exe, locations.ClassesKey);
+        }
+        catch (Exception e)
+        {
+            AppLog.Warn($"Could not register voidcrewmod:// links: {e.Message}");
+        }
     }
 
     /// <summary>The arguments a restarted launcher keeps (after a self-update).</summary>
@@ -92,6 +124,8 @@ public partial class App : Application
         var kept = new List<string>();
         if (args.Any(a => a.Equals("--portable", StringComparison.OrdinalIgnoreCase))) kept.Add("--portable");
         if (Argument(args, "--data-dir") is { } dataDir) kept.AddRange(new[] { "--data-dir", dataDir });
+        // A link that started this launcher is handled after the update instead.
+        if (LauncherLinks.FindIn(args) is { } link) kept.Add(link);
         return kept;
     }
 
@@ -123,6 +157,7 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _links?.Dispose();
         _service?.Dispose();
         _single?.Dispose();
         base.OnExit(e);

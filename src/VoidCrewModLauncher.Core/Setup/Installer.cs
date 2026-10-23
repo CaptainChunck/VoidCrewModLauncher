@@ -15,6 +15,9 @@ public sealed record InstallLocations(string InstallDirectory, string StartMenuD
 
     public string InstalledExe => Path.Combine(InstallDirectory, ExeName);
 
+    /// <summary>Where the voidcrewmod:// link type is registered (HKCU\Software\Classes, or under the test key); null for none.</summary>
+    public string? ClassesKey { get; init; }
+
     /// <summary>Set to a folder to try the install there (Programs, StartMenu and Desktop inside it, a test registry key).</summary>
     public const string TestRootVariable = "VCML_INSTALL_ROOT";
 
@@ -25,13 +28,19 @@ public sealed record InstallLocations(string InstallDirectory, string StartMenuD
         if (!string.IsNullOrWhiteSpace(testRoot))
         {
             return new InstallLocations(Path.Combine(testRoot, "Programs", "VoidCrewModLauncher"), Path.Combine(testRoot, "StartMenu"),
-                Path.Combine(testRoot, "Desktop"), @"Software\VoidCrewModLauncherInstallTest");
+                Path.Combine(testRoot, "Desktop"), @"Software\VoidCrewModLauncherInstallTest")
+            {
+                ClassesKey = @"Software\VoidCrewModLauncherInstallTest\Classes",
+            };
         }
         return new InstallLocations(
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "VoidCrewModLauncher"),
             Environment.GetFolderPath(Environment.SpecialFolder.Programs),
             Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
-            @"Software\Microsoft\Windows\CurrentVersion\Uninstall\VoidCrewModLauncher");
+            @"Software\Microsoft\Windows\CurrentVersion\Uninstall\VoidCrewModLauncher")
+        {
+            ClassesKey = @"Software\Classes",
+        };
     }
 
     public static bool IsTestInstall => !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(TestRootVariable));
@@ -93,6 +102,7 @@ public static class Installer
         Directory.CreateDirectory(locations.InstallDirectory);
         CopyExe(sourceExe, locations.InstalledExe);
 
+        if (locations.ClassesKey != null) LauncherLinks.Register(locations.InstalledExe, locations.ClassesKey);
         CreateShortcut(Path.Combine(locations.StartMenuDirectory, InstallLocations.ShortcutName), locations.InstalledExe);
         CreateShortcut(Path.Combine(locations.DesktopDirectory, InstallLocations.ShortcutName), locations.InstalledExe);
 
@@ -190,6 +200,7 @@ public static class Installer
         TryDelete(Path.Combine(locations.StartMenuDirectory, InstallLocations.ShortcutName));
         TryDelete(Path.Combine(locations.DesktopDirectory, InstallLocations.ShortcutName));
         if (locations.UninstallKey != null) Registry.CurrentUser.DeleteSubKeyTree(locations.UninstallKey, false);
+        if (locations.ClassesKey != null) LauncherLinks.Unregister(locations.ClassesKey);
 
         if (gameDirectory != null && Doorstop.Inspect(gameDirectory).InstalledByLauncher)
         {

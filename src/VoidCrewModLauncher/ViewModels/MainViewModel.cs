@@ -347,7 +347,8 @@ public partial class MainViewModel : ObservableObject
     /// it's fresh) and updates for the installed mods.
     /// </summary>
     /// <param name="updatedFrom">The version this launcher was updated from, when it just updated itself.</param>
-    public async Task StartAsync(string? updatedFrom = null)
+    /// <param name="link">A voidcrewmod:// link the launcher was started with, handled once the mod list is loaded.</param>
+    public async Task StartAsync(string? updatedFrom = null, string? link = null)
     {
         if (updatedFrom != null)
         {
@@ -375,11 +376,103 @@ public partial class MainViewModel : ObservableObject
             AppLog.Error("Loading Thunderstore's mod list failed", e);
             SetStatus(updatedText + "Thunderstore couldn't be reached. Mods you have still work; try REFRESH on the MODS tab later.");
         }
+        _started.TrySetResult();
+        if (link != null) await HandleLinkAsync(link);
         if (Service.GameDirectory == null)
         {
             Navigate("settings");
             Dialogs.Info("Void Crew not found", "The launcher couldn't find Void Crew through Steam. Choose its folder on the SETTINGS tab (the one with Void Crew.exe).");
         }
+    }
+
+    /// <summary>Set once start-up has loaded the mod list.</summary>
+    private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>
+    /// A voidcrewmod:// link from a website: brings the launcher up and, for an install, shows the mod and installs it
+    /// (with what it needs) once the player agrees. Nothing is installed without that.
+    /// </summary>
+    public async Task HandleLinkAsync(string text)
+    {
+        AppLog.Info($"Link: {text}");
+        ShowWindow();
+        LauncherLink? link = LauncherLinks.Parse(text);
+        if (link == null)
+        {
+            Dialogs.Error("Link not understood", "This link isn't one the Void Crew Mod Launcher knows. Update the launcher (SETTINGS > CHECK FOR UPDATES) and try again.");
+            return;
+        }
+        if (link.Action != LinkAction.Install || link.ModId == null) return;
+
+        await _started.Task;
+        for (int i = 0; i < 600 && IsBusy; i++) await Task.Delay(100);
+        SetStatus($"Looking up {link.ModId}...");
+        try
+        {
+            await Service.FreshenAsync(new[] { link.ModId });
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            AppLog.Warn($"Looking up {link.ModId} failed: {e.Message}");
+        }
+        Core.Thunderstore.TsPackage? package = Service.Index.Find(link.ModId);
+        if (package == null)
+        {
+            SetStatus("Ready.");
+            Dialogs.Error("Mod not found", $"{link.ModId} isn't on Thunderstore's Void Crew list or GitHub, so the launcher can't install it.");
+            return;
+        }
+        string version = link.Version ?? package.Latest?.VersionNumber ?? "";
+        if (link.Version != null && package.Version(link.Version) == null)
+        {
+            SetStatus("Ready.");
+            Dialogs.Error("Version not found", $"{package.DisplayName} {link.Version} isn't on Thunderstore.");
+            return;
+        }
+        InstalledMod? mine = Service.Library.Find(package.FullName);
+        Navigate("mods");
+        Mods.ShowBrowse = false;
+        if (mine != null && Core.Thunderstore.VersionNumber.Same(mine.Version, version))
+        {
+            if (!mine.Enabled) await RunAsync($"Turning on {mine.DisplayName}", () => Service.SetModEnabledAsync(mine.Id, true, null));
+            SetStatus($"{package.DisplayName} {version} is installed and on.");
+            return;
+        }
+
+        string needs = string.Join(", ", Service.GitHubMods.NeededBy(package.FullName).Where(m => Service.CopyOf(m) == null).Select(m => m.Name));
+        string message = $"A link asked the launcher to install {package.DisplayName} {version} by {package.Author}"
+                         + (needs.Length > 0 ? $", with {needs} which it needs" : "")
+                         + (mine != null ? $" (you have {mine.Version})." : ".");
+        if (!Dialogs.Confirm(mine != null ? "Update mod" : "Install mod", message, mine != null ? "UPDATE" : "INSTALL"))
+        {
+            SetStatus("Ready.");
+            return;
+        }
+        var progress = new SyncProgress<InstallStatus>(s => OnUi(() => SetStatus(s.Message, s.Fraction)));
+        bool ok = await RunAsync($"Installing {package.DisplayName}", async () =>
+        {
+            if (link.Version != null)
+            {
+                await Service.Mods.InstallAsync(package.FullName, link.Version, progress);
+                await Service.AddNeededGitHubModsAsync(package.FullName, progress);
+            }
+            else
+            {
+                await Service.InstallModAsync(package.FullName, progress);
+            }
+        });
+        if (ok) SetStatus($"{package.DisplayName} {Service.Library.Find(package.FullName)?.Version ?? version} is installed and on. It loads the next time you play or host.");
+    }
+
+    /// <summary>Brings the launcher's window to the front (a link was clicked in a browser).</summary>
+    private static void ShowWindow()
+    {
+        if (Application.Current?.MainWindow is not { } window) return;
+        if (window.WindowState == WindowState.Minimized) window.WindowState = WindowState.Normal;
+        window.Activate();
+        window.Topmost = true;
+        window.Topmost = false;
+        window.Focus();
     }
 
     /// <summary>

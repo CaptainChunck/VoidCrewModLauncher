@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0
+
+- **Install from a website:** voidcrewmod:// links open the launcher and install that mod, with what it needs, after
+  you confirm. A link that arrives while the launcher is open goes to that window. The setup registers the links
+  for your Windows user, and uninstalling removes them. Formats: `voidcrewmod://install/Namespace-Name` (newest
+  version), `voidcrewmod://install/Namespace-Name/1.2.3`, `voidcrewmod://install/github-Raicuparta-UUVR` and
+  `voidcrewmod://open`.
+- Releases no longer include a Thunderstore zip.
+
 ## 0.4.0
 
 - **UUVR comes with the VR UI Fix:** installing or turning on the Void Crew VR UI Fix also installs the newest UUVR

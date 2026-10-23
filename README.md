@@ -125,6 +125,20 @@ Windows 10 or 11 (64-bit); no .NET install needed. Windows may warn about an unr
 | `...\runtime\BepInEx\LogOutput.log` | The game's BepInEx log (SETTINGS > GAME LOG) |
 | `...\logs\launcher.log` | The launcher's log (SETTINGS > LAUNCHER LOG) |
 
+## For websites: install links
+
+A "download with the Mod Launcher" button is a link the launcher handles (the setup registers it for the user):
+
+| Link | Does |
+|---|---|
+| `voidcrewmod://install/Namespace-Name` | Installs the newest version of a Thunderstore mod (or a newer GitHub release, see above) with its dependencies, after the player confirms |
+| `voidcrewmod://install/Namespace-Name/1.2.3` | The same for one version |
+| `voidcrewmod://install/github-Raicuparta-UUVR` | A GitHub-only mod the launcher knows |
+| `voidcrewmod://open` | Brings the launcher up |
+
+Ids are Thunderstore's `Namespace-Name` (`Captain_Chuncks_Mods-Void_Crew_Fleet`). Players without the launcher need
+the setup first: `https://github.com/CaptainChunck/VoidCrewModLauncher/releases/latest/download/VoidCrewModLauncher-Setup.exe`.
+
 ## For mod authors
 
 - Hosts using the launcher put a room property `VCML` in the lobby list:
