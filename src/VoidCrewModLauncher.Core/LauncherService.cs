@@ -114,6 +114,7 @@ public sealed class LauncherService : IDisposable
         List<string> installed = Library.Mods.Where(m => m.Source == ModSource.Thunderstore).Select(m => m.Id).ToList();
         if (!Thunderstore.IsOffline) index = index.Merge(await Thunderstore.GetCurrentAsync(installed, cancel));
         index = index.Merge(await NewerOnGitHubAsync(installed.Select(index.Find).OfType<TsPackage>(), cancel));
+        index = index.Merge(await GitHubOnlyAsync(GitHubModsInUse(), cancel));
         Mods.Index = index;
         PackagesChanged?.Invoke();
     }
@@ -160,6 +161,7 @@ public sealed class LauncherService : IDisposable
         }
         PackageIndex withFresh = Mods.Index.Merge(fresh);
         fresh.AddRange(await NewerOnGitHubAsync(wanted.Select(withFresh.Find).OfType<TsPackage>(), cancel));
+        fresh.AddRange(await GitHubOnlyAsync(wanted.Select(GitHubMods.Find).OfType<GitHubMod>(), cancel));
         Merge(fresh);
     }
 
@@ -197,11 +199,100 @@ public sealed class LauncherService : IDisposable
         return true;
     }
 
-    /// <summary>Installs a Thunderstore mod at its newest version (checked with Thunderstore first) and turns it on.</summary>
+    /// <summary>
+    /// Installs a Thunderstore mod at its newest version (checked with Thunderstore first) and turns it on, with the
+    /// GitHub-only mods it needs (UUVR for the VR UI Fix).
+    /// </summary>
     public async Task<InstalledMod> InstallModAsync(string id, IProgress<InstallStatus>? status, CancellationToken cancel = default)
     {
         await FreshenAsync(new[] { id }, cancel);
-        return await Mods.InstallAsync(id, null, status, cancel);
+        InstalledMod mod = await Mods.InstallAsync(id, null, status, cancel);
+        await AddNeededGitHubModsAsync(id, status, cancel);
+        return mod;
+    }
+
+    /// <summary>Turns a mod on (with what it needs, GitHub-only mods included) or off.</summary>
+    public async Task SetModEnabledAsync(string id, bool enabled, IProgress<InstallStatus>? status, CancellationToken cancel = default)
+    {
+        await Mods.SetEnabledAsync(id, enabled, status, cancel);
+        if (enabled) await AddNeededGitHubModsAsync(id, status, cancel);
+    }
+
+    // ---------------------------------------------------------------- GitHub-only mods (UUVR)
+
+    /// <summary>The GitHub-only mods the launcher knows and which mods need them.</summary>
+    public GitHubModCatalog GitHubMods { get; init; } = GitHubModCatalog.Default;
+
+    /// <summary>The copy of a GitHub-only mod in your mods: the launcher's own, or one with its plugin (imported from Rai Pal, say).</summary>
+    public InstalledMod? CopyOf(GitHubMod mod) =>
+        Library.Find(mod.Id) ?? Library.Mods.FirstOrDefault(m => m.PluginGuids.Any(g => g.StartsWith(mod.PluginGuidPrefix, StringComparison.OrdinalIgnoreCase)));
+
+    /// <summary>GitHub-only mods you have, or that one of your mods needs.</summary>
+    private IEnumerable<GitHubMod> GitHubModsInUse() => GitHubMods.All.Where(m =>
+        Library.Find(m.Id) != null || Library.Mods.Any(mine => GitHubMods.NeededBy(mine.Id).Contains(m)));
+
+    /// <summary>The newest releases of GitHub-only mods, as packages for the list.</summary>
+    private async Task<List<TsPackage>> GitHubOnlyAsync(IEnumerable<GitHubMod> mods, CancellationToken cancel)
+    {
+        var packages = new List<TsPackage>();
+        foreach (GitHubMod mod in mods)
+        {
+            if (await GitHub.GetModAsync(mod, cancel) is { } package) packages.Add(package);
+        }
+        return packages;
+    }
+
+    /// <summary>
+    /// Installs the GitHub-only mods <paramref name="id"/> needs (UUVR for the VR UI Fix) at their newest release, or turns
+    /// your copy on. A copy you already have, such as UUVR imported from Rai Pal, is used instead of a second one.
+    /// Returns "Name version" of each mod installed.
+    /// </summary>
+    public async Task<List<string>> AddNeededGitHubModsAsync(string id, IProgress<InstallStatus>? status, CancellationToken cancel = default)
+    {
+        var added = new List<string>();
+        foreach (GitHubMod needed in GitHubMods.NeededBy(id))
+        {
+            if (CopyOf(needed) is { } copy)
+            {
+                if (!copy.Enabled) Library.Update(copy.Id, m => m.Enabled = true);
+                continue;
+            }
+            if (Index.Find(needed.Id) == null) Merge(await GitHubOnlyAsync(new[] { needed }, cancel));
+            if (Index.Find(needed.Id) == null)
+            {
+                AppLog.Warn($"{needed.Name} couldn't be found on GitHub ({needed.Repo}); {id} needs it. The launcher tries again next time it starts.");
+                continue;
+            }
+            status?.Report(new InstallStatus($"Installing {needed.Name} from GitHub, which {Library.Find(id)?.DisplayName ?? id} needs"));
+            InstalledMod mod = await Mods.InstallAsync(needed.Id, null, status, cancel);
+            Library.Update(mod.Id, m => m.InstalledAsDependency = true);
+            added.Add($"{mod.DisplayName} {mod.Version}");
+        }
+        return added;
+    }
+
+    /// <summary>The GitHub-only mods your turned-on mods need and you don't have yet (a download that failed before, say).</summary>
+    public async Task<List<string>> AddMissingGitHubModsAsync(IProgress<InstallStatus>? status, CancellationToken cancel = default)
+    {
+        var added = new List<string>();
+        foreach (InstalledMod mod in Library.Enabled.ToList())
+        {
+            if (GitHubMods.NeededBy(mod.Id).All(needed => CopyOf(needed) != null)) continue;
+            added.AddRange(await AddNeededGitHubModsAsync(mod.Id, status, cancel));
+        }
+        return added;
+    }
+
+    /// <summary>Your turned-on mods that need <paramref name="id"/>: its dependents, and for a GitHub-only mod the mods that need it.</summary>
+    public List<InstalledMod> EnabledDependents(string id)
+    {
+        List<InstalledMod> dependents = Mods.EnabledDependents(id);
+        InstalledMod? mine = Library.Find(id);
+        foreach (GitHubMod provided in GitHubMods.All.Where(g => mine != null && CopyOf(g)?.Id == mine.Id))
+        {
+            dependents.AddRange(Library.Enabled.Where(m => GitHubMods.NeededBy(m.Id).Contains(provided) && !dependents.Contains(m)));
+        }
+        return dependents;
     }
 
     /// <summary>Updates one installed mod to its newest version (checked with Thunderstore first).</summary>
@@ -272,6 +363,16 @@ public sealed class LauncherService : IDisposable
             bool byUser = Settings.Host.ModNeeds.TryGetValue(package.FullName, out ModNeed chosen);
             ModNeed need = byUser ? chosen : ModPolicy.GuessNeed(package.FullName, package.Categories);
             mods.Add(new RuntimeMod(package.FullName, package.Name, version.VersionNumber, folder, false, need, byUser));
+        }
+
+        // GitHub-only mods your turned-on mods need (UUVR for the VR UI Fix) load with them, like dependencies.
+        foreach (GitHubMod needed in Library.Enabled.SelectMany(m => GitHubMods.NeededBy(m.Id)).Distinct())
+        {
+            if (CopyOf(needed) is not { Enabled: false } copy || mods.Any(m => string.Equals(m.Id, copy.Id, StringComparison.OrdinalIgnoreCase))) continue;
+            string folder = Store.VersionDirectory(copy.Id, copy.Version);
+            if (!Directory.Exists(folder)) continue;
+            AppLog.Info($"Also loading {copy.Id} {copy.Version}: another enabled mod needs it.");
+            mods.Add(new RuntimeMod(copy.Id, copy.Name, copy.Version, folder, copy.IsLocal, copy.GuessedNeed));
         }
         return mods;
     }

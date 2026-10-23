@@ -50,6 +50,9 @@ it hosts lobbies with your mods in one click.
     it's newer: its package zip (it must say it's that mod at that version and match GitHub's checksum), or its plugin
     DLLs put into the Thunderstore files. These versions show a GITHUB badge, and players joining your lobby get the
     same release.
+  - **UUVR comes with the VR UI Fix**: installing or turning on the Void Crew VR UI Fix also installs the newest
+    [UUVR](https://github.com/Raicuparta/uuvr) (its Mono "modern" build) from GitHub, unless you already have a copy
+    (imported from Rai Pal, say). UUVR, as with Rai Pal, copies its VR runtime files into the game folder when it starts.
   - **While you play**, the launcher checks the game's mods every 15 minutes. When one gets an update, one quiet line
     in your own text chat says to restart Void Crew from the launcher; nothing pops up or makes a sound.
 

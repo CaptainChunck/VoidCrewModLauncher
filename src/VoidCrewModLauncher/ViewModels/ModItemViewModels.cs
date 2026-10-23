@@ -127,9 +127,17 @@ public partial class PackageViewModel : ObservableObject
 
     public string ActionText => Installed == null ? "INSTALL" : HasUpdate ? "UPDATE" : "INSTALLED";
 
-    public string Dependencies => Package.Latest?.Dependencies is { Count: > 0 } deps
-        ? string.Join(", ", deps.Select(d => PackageReference.Parse(d) is { } r ? r.Name.Replace('_', ' ') : d))
-        : "None";
+    public string Dependencies
+    {
+        get
+        {
+            var names = (Package.Latest?.Dependencies ?? new List<string>())
+                .Select(d => PackageReference.Parse(d) is { } r ? r.Name.Replace('_', ' ') : d)
+                .Concat(Core.GitHub.GitHubModCatalog.Default.NeededBy(Id).Select(m => m.Name + " (GitHub)"))
+                .ToList();
+            return names.Count > 0 ? string.Join(", ", names) : "None";
+        }
+    }
 
     public string FileSize => Format.Bytes(Package.Latest?.FileSize ?? 0);
 

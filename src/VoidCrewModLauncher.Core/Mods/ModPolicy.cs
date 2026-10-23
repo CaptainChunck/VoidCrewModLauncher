@@ -18,6 +18,8 @@ public static class ModPolicy
         ["Captain_Chuncks_Mods-Void_Crew_Fleet"] = ModNeed.Everyone,
         ["Captain_Chuncks_Mods-Ship_Customizer"] = ModNeed.Everyone,
         ["Captain_Chuncks_Mods-Void_Crew_VR_UI_Fix"] = ModNeed.ClientOnly,
+        // VR for the player's own game only.
+        ["github-Raicuparta-UUVR"] = ModNeed.ClientOnly,
         // Libraries: whoever needs them gets them as a dependency.
         ["NihilityShift-VoidManager"] = ModNeed.ClientOnly,
         ["VoidCrewModdingTeam-VoidManager"] = ModNeed.ClientOnly,

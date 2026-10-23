@@ -7,6 +7,9 @@ public enum ModSource
 {
     Thunderstore,
     Local,
+
+    /// <summary>A mod that is only on GitHub (such as UUVR), installed from its releases.</summary>
+    GitHub,
 }
 
 /// <summary>What happens to one of your mods when you join somebody else's lobby.</summary>

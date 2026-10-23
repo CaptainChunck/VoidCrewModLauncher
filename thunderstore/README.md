@@ -31,7 +31,8 @@ Crew through Steam and downloads BepInEx for you.
   Players who join through the launcher get your mods automatically.
 - **Updates**: the launcher updates itself from GitHub and keeps your mods on their newest versions, from Thunderstore
   or, when a mod's GitHub releases are newer, from GitHub (SETTINGS > UPDATES). While you play, a quiet line in your
-  own chat tells you when one of the game's mods has an update.
+  own chat tells you when one of the game's mods has an update. Installing the Void Crew VR UI Fix also installs
+  UUVR from its GitHub releases.
 
 The lobby list comes from your own game: start Void Crew from the launcher and the list fills once the main menu is up.
 Your Void Crew folder only gets BepInEx's loader (after asking, and switched off when you start the game from Steam).

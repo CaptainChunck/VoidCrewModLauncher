@@ -117,7 +117,7 @@ public sealed class ModManager
     public static InstalledMod Describe(TsPackage package, TsVersion version, string folder) => new()
     {
         Id = package.FullName,
-        Source = ModSource.Thunderstore,
+        Source = package.IsGitHubOnly ? ModSource.GitHub : ModSource.Thunderstore,
         Name = package.Name,
         Author = package.Owner,
         Version = version.VersionNumber,
@@ -135,7 +135,7 @@ public sealed class ModManager
     public List<(InstalledMod Mod, TsVersion Latest)> Updates()
     {
         var updates = new List<(InstalledMod, TsVersion)>();
-        foreach (InstalledMod mod in _library.Mods.Where(m => m.Source == ModSource.Thunderstore))
+        foreach (InstalledMod mod in _library.Mods.Where(m => m.Source is ModSource.Thunderstore or ModSource.GitHub))
         {
             TsVersion? latest = Index.Find(mod.Id)?.Latest;
             if (latest != null && VersionNumber.Compare(latest.VersionNumber, mod.Version) > 0) updates.Add((mod, latest));

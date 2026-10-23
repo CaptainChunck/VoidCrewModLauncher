@@ -45,6 +45,11 @@ public sealed class GitHubSource
 
     /// <summary>The Thunderstore version the plugin DLLs go into.</summary>
     public TsVersion? Base { get; init; }
+
+    /// <summary>
+    /// For a GitHub-only mod (no manifest.json in its zip): a plugin in the download must have a GUID starting with this.
+    /// </summary>
+    public string? PluginGuidPrefix { get; init; }
 }
 
 /// <summary>
@@ -145,6 +150,31 @@ public sealed class GitHubClient : IDisposable
         return release == null ? null : ToVersion(release.RootElement, repo, package);
     }
 
+    /// <summary>A GitHub-only mod as a package holding its newest release, or null (no release, or no file to install).</summary>
+    public async Task<TsPackage?> GetModAsync(GitHubMod mod, CancellationToken cancel = default)
+    {
+        using JsonDocument? release = await GetAsync($"/repos/{mod.Repo.Owner}/{mod.Repo.Name}/releases/latest", cancel);
+        if (release == null) return null;
+        var package = new TsPackage
+        {
+            Name = mod.Name,
+            FullName = mod.Id,
+            Owner = mod.Author,
+            PackageUrl = mod.Repo.Url,
+            Categories = new List<string> { "Client-Side" },
+            IsGitHubOnly = true,
+        };
+        TsVersion? version = ToVersion(release.RootElement, mod.Repo, package, mod);
+        if (version == null)
+        {
+            AppLog.Warn($"{mod.Name}'s newest release ({mod.Repo}) has no {mod.Asset}.");
+            return null;
+        }
+        version.Description = mod.Description;
+        package.DateCreated = package.DateUpdated = version.DateCreated;
+        return package.WithVersions(new[] { version });
+    }
+
     /// <summary>The release of one version (tag "v1.2.3" or "1.2.3") as a version of <paramref name="package"/>, or null.</summary>
     public async Task<TsVersion?> GetReleaseAsync(GitHubRepo repo, TsPackage package, string version, CancellationToken cancel = default)
     {
@@ -159,9 +189,10 @@ public sealed class GitHubClient : IDisposable
     /// <summary>
     /// A release as a version of <paramref name="package"/>: a published release whose tag is a version ("v1.2.3"), with
     /// the package's zip, or else plugin DLLs to put into the newest Thunderstore version's files. Description, icon and
-    /// dependencies come from that Thunderstore version until the zip's manifest is read. Null for anything else.
+    /// dependencies come from that Thunderstore version until the zip's manifest is read. For a GitHub-only
+    /// <paramref name="mod"/>, its own release file. Null for anything else.
     /// </summary>
-    public static TsVersion? ToVersion(JsonElement release, GitHubRepo repo, TsPackage package)
+    public static TsVersion? ToVersion(JsonElement release, GitHubRepo repo, TsPackage package, GitHubMod? mod = null)
     {
         if (Bool(release, "draft") || Bool(release, "prerelease")) return null;
         string version = (Text(release, "tag_name") ?? "").Trim().TrimStart('v', 'V');
@@ -182,9 +213,9 @@ public sealed class GitHubClient : IDisposable
             }
         }
 
-        TsVersion? basis = package.LatestOnThunderstore;
-        GitHubAsset? zip = PickPackage(assets, package, repo);
-        List<GitHubAsset> plugins = zip == null ? assets.Where(a => a.Name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)).ToList() : new List<GitHubAsset>();
+        TsVersion? basis = mod == null ? package.LatestOnThunderstore : null;
+        GitHubAsset? zip = mod != null ? PickAsset(assets, mod.Asset) : PickPackage(assets, package, repo);
+        List<GitHubAsset> plugins = zip == null && mod == null ? assets.Where(a => a.Name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)).ToList() : new List<GitHubAsset>();
         if (zip == null && (plugins.Count == 0 || basis == null)) return null;
         DateTimeOffset published = DateTimeOffset.TryParse(Text(release, "published_at"), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out DateTimeOffset at) ? at : DateTimeOffset.UtcNow;
 
@@ -208,8 +239,19 @@ public sealed class GitHubClient : IDisposable
                 Package = zip,
                 Plugins = plugins,
                 Base = zip == null ? basis : null,
+                PluginGuidPrefix = mod?.PluginGuidPrefix,
             },
         };
+    }
+
+    /// <summary>A GitHub-only mod's release file: by its name, or one whose name has it in (a version added, say).</summary>
+    private static GitHubAsset? PickAsset(List<GitHubAsset> assets, string name)
+    {
+        string simple = PackageIndex.Simplify(Path.GetFileNameWithoutExtension(name));
+        string extension = Path.GetExtension(name);
+        return assets.FirstOrDefault(a => string.Equals(a.Name, name, StringComparison.OrdinalIgnoreCase))
+               ?? assets.FirstOrDefault(a => a.Name.EndsWith(extension, StringComparison.OrdinalIgnoreCase)
+                                             && PackageIndex.Simplify(Path.GetFileNameWithoutExtension(a.Name)).Contains(simple, StringComparison.Ordinal));
     }
 
     /// <summary>The release's package zip: one named like the package, else like the repo, else the only zip.</summary>

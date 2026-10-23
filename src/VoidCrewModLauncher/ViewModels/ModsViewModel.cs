@@ -119,7 +119,7 @@ public partial class ModsViewModel : ObservableObject
         ModManager mods = _main.Service.Mods;
         if (!enabled)
         {
-            List<InstalledMod> dependents = mods.EnabledDependents(row.Id);
+            List<InstalledMod> dependents = _main.Service.EnabledDependents(row.Id);
             if (dependents.Count > 0)
             {
                 int choice = _main.Dialogs.Ask("Other mods need it",
@@ -140,7 +140,7 @@ public partial class ModsViewModel : ObservableObject
             _main.SetStatus($"{row.Name} is off. It isn't loaded when you play or host.");
             return;
         }
-        bool ok = await _main.RunAsync($"Turning on {row.Name}", () => mods.SetEnabledAsync(row.Id, true, new SyncProgress<InstallStatus>(s => _main.OnUi(() => _main.SetStatus(s.Message, s.Fraction)))));
+        bool ok = await _main.RunAsync($"Turning on {row.Name}", () => _main.Service.SetModEnabledAsync(row.Id, true, new SyncProgress<InstallStatus>(s => _main.OnUi(() => _main.SetStatus(s.Message, s.Fraction)))));
         if (!ok) row.ResetEnabled(false);
         else _main.SetStatus($"{row.Name} is on.");
     }
@@ -161,7 +161,7 @@ public partial class ModsViewModel : ObservableObject
     private void Uninstall(InstalledModViewModel row)
     {
         if (!_main.CheckIdle($"Removing {row.Name}")) return;
-        List<InstalledMod> dependents = _main.Service.Mods.EnabledDependents(row.Id);
+        List<InstalledMod> dependents = _main.Service.EnabledDependents(row.Id);
         string warning = dependents.Count > 0 ? $"\n\n{string.Join(", ", dependents.Select(d => d.DisplayName))} need it, so the launcher will download it again for them." : "";
         if (!_main.Dialogs.Confirm("Remove mod", $"Remove {row.Name} {row.Version} from the launcher?{warning}\n\nIts settings file (BepInEx\\config) is kept.", "REMOVE")) return;
         _main.Service.Mods.Uninstall(row.Id);

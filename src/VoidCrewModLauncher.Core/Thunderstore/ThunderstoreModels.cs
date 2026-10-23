@@ -27,6 +27,10 @@ public sealed class TsPackage
     [JsonIgnore]
     public TsVersion? LatestOnThunderstore => Versions.Where(v => v.GitHub == null).MaxBy(v => v.VersionNumber, VersionNumber.Comparer);
 
+    /// <summary>A mod that is only on GitHub (see GitHubModCatalog): found by id, but not in the MODS list.</summary>
+    [JsonIgnore]
+    public bool IsGitHubOnly { get; init; }
+
     [JsonIgnore]
     public long TotalDownloads => Versions.Sum(v => (long)v.Downloads);
 

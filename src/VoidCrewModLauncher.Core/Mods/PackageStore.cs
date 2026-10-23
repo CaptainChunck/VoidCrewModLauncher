@@ -83,7 +83,10 @@ public sealed class PackageStore
             string zip = await _github.DownloadAsync(github.Package, progress, cancel);
             try
             {
-                await Task.Run(() => Unpack(zip, target, folder => CheckManifest(folder, reference, version)), cancel);
+                Action<string> check = github.PluginGuidPrefix is { } prefix
+                    ? folder => CheckPlugin(folder, prefix, reference, version)
+                    : folder => CheckManifest(folder, reference, version);
+                await Task.Run(() => Unpack(zip, target, check), cancel);
             }
             finally
             {
@@ -139,6 +142,15 @@ public sealed class PackageStore
         if (root.TryGetProperty("dependencies", out JsonElement dependencies) && dependencies.ValueKind == JsonValueKind.Array)
         {
             version.Dependencies = dependencies.EnumerateArray().Where(d => d.ValueKind == JsonValueKind.String).Select(d => d.GetString()!).ToList();
+        }
+    }
+
+    /// <summary>A GitHub-only mod's download must hold its plugin (a GUID starting with <paramref name="prefix"/>).</summary>
+    private static void CheckPlugin(string folder, string prefix, PackageReference reference, TsVersion version)
+    {
+        if (!PluginScanner.ScanDirectory(folder).Any(p => p.Guid.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidDataException($"The GitHub release {version.VersionNumber} of {reference.Name} has no {prefix} plugin; not using it.");
         }
     }
 

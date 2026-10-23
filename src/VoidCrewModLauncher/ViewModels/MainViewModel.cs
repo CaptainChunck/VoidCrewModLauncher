@@ -365,6 +365,8 @@ public partial class MainViewModel : ObservableObject
             SetStatus("Loading Thunderstore's Void Crew mods...");
             await Service.RefreshPackagesAsync(false);
             string? modsText = Service.Settings.AutoUpdateMods ? await UpdateModsAsync() : null;
+            string? githubText = await AddMissingGitHubModsAsync();
+            if (githubText != null) modsText = modsText == null ? githubText : modsText + " " + githubText;
             int updates = Service.Mods.Updates().Count;
             SetStatus(updatedText + (modsText ?? (updates > 0 ? $"{updates} of your mods can be updated (MOD MANAGER)." : "Ready.")));
         }
@@ -388,7 +390,7 @@ public partial class MainViewModel : ObservableObject
     {
         try
         {
-            await Service.FreshenAsync(Service.Library.Mods.Where(m => m.Source == ModSource.Thunderstore).Select(m => m.Id));
+            await Service.FreshenAsync(Service.Library.Mods.Where(m => m.Source is ModSource.Thunderstore or ModSource.GitHub).Select(m => m.Id));
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
@@ -411,6 +413,17 @@ public partial class MainViewModel : ObservableObject
         if (text.Length > 0) SetStatus(text);
         await TellGameAboutUpdatesAsync();
         return text.Length > 0 ? text : null;
+    }
+
+    /// <summary>Installs GitHub-only mods your turned-on mods need and don't have yet (UUVR for the VR UI Fix).</summary>
+    private async Task<string?> AddMissingGitHubModsAsync()
+    {
+        List<string> added = new();
+        await RunAsync("Installing what your mods need", async () =>
+        {
+            added = await Service.AddMissingGitHubModsAsync(new SyncProgress<InstallStatus>(s => OnUi(() => SetStatus(s.Message, s.Fraction))));
+        });
+        return added.Count > 0 ? $"Installed from GitHub: {string.Join(", ", added)}." : null;
     }
 
     /// <summary>

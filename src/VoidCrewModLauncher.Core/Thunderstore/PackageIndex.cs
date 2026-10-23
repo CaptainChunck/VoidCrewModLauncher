@@ -57,8 +57,8 @@ public sealed class PackageIndex
 
     public IReadOnlyList<TsPackage> All { get; }
 
-    /// <summary>What the Mods tab lists: not BepInEx itself, not mod managers, not NSFW.</summary>
-    public IEnumerable<TsPackage> Mods => All.Where(p => !NotMods.Contains(p.FullName) && !p.HasNsfwContent && !IsBepInExPack(p.FullName));
+    /// <summary>What the Mods tab lists: Thunderstore's mods, not BepInEx itself, not mod managers, not NSFW.</summary>
+    public IEnumerable<TsPackage> Mods => All.Where(p => !p.IsGitHubOnly && !NotMods.Contains(p.FullName) && !p.HasNsfwContent && !IsBepInExPack(p.FullName));
 
     public static bool IsBepInExPack(string id) => string.Equals(id, BepInExPackId, StringComparison.OrdinalIgnoreCase);
 

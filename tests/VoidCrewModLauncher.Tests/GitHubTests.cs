@@ -2,6 +2,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text.Json;
 using VoidCrewModLauncher.Core;
+using VoidCrewModLauncher.Core.Game;
 using VoidCrewModLauncher.Core.GitHub;
 using VoidCrewModLauncher.Core.Lobbies;
 using VoidCrewModLauncher.Core.Mods;
@@ -220,6 +221,55 @@ public class GitHubTests
             Assert.Equal(2, http.Requests.Count);
             Assert.Equal("\"abc\"", http.IfNoneMatch[LatestUrl]);
         }
+    }
+
+    [Fact]
+    public async Task Installing_a_mod_installs_the_GitHub_only_mod_it_needs_once()
+    {
+        using var temp = new TempFolder();
+        // A stand-in for UUVR: the bridge DLL is a real BepInEx plugin with a known GUID.
+        var vr = new GitHubMod("github-Someone-VR", "VR", "Someone", new GitHubRepo("Someone", "vr"), "vr-mono-modern.zip", BridgeDefaults.PluginGuid, "VR");
+        var catalog = new GitHubModCatalog(new[] { vr }, new Dictionary<string, string[]> { ["Captain_Chuncks_Mods-Void_Crew_VR_UI_Fix"] = new[] { vr.Id } });
+        byte[] vrZip;
+        using (var memory = new MemoryStream())
+        {
+            using (var zip = new System.IO.Compression.ZipArchive(memory, System.IO.Compression.ZipArchiveMode.Create, true))
+            {
+                using (Stream entry = zip.CreateEntry("plugins/Vr.dll").Open()) entry.Write(EmbeddedBridge.Read());
+                using (var writer = new StreamWriter(zip.CreateEntry("patchers/CopyToGame/Data/x.json").Open())) writer.Write("{}");
+            }
+            vrZip = memory.ToArray();
+        }
+        TsPackage fix = VrUiFix();
+        var http = ThunderstoreList(new FakeHttp(), fix)
+            .On(fix.Versions[0].DownloadUrl, FakeHttp.Zip(("manifest.json", "{\"name\":\"Void_Crew_VR_UI_Fix\",\"version_number\":\"3.14.1\"}"), ("plugins/VoidCrewVRUIFix.dll", "fix")))
+            .On("https://api.github.com/repos/Someone/vr/releases/latest", Release("v0.4.0", ("vr-il2cpp-legacy.zip", new byte[3]), ("vr-mono-modern.zip", vrZip)))
+            .On("https://github.test/v0.4.0/vr-mono-modern.zip", vrZip);
+        using var service = new LauncherService(temp.AppPaths(), http) { GitHubMods = catalog };
+        service.Settings.GitHubUpdates = false;
+        await service.RefreshPackagesAsync(true);
+
+        await service.InstallModAsync("Captain_Chuncks_Mods-Void_Crew_VR_UI_Fix", null);
+        InstalledMod installed = service.Library.Find(vr.Id)!;
+        Assert.Equal(ModSource.GitHub, installed.Source);
+        Assert.Equal("0.4.0", installed.Version);
+        Assert.True(installed.Enabled);
+        Assert.True(installed.InstalledAsDependency);
+        Assert.Contains(BridgeDefaults.PluginGuid, installed.PluginGuids);
+        string folder = service.Store.VersionDirectory(vr.Id, "0.4.0");
+        Assert.True(File.Exists(Path.Combine(folder, "patchers", "CopyToGame", "Data", "x.json")));
+        Assert.DoesNotContain(service.Index.Mods, p => p.FullName == vr.Id);
+        Assert.Contains(service.EnabledDependents(vr.Id), m => m.Id == "Captain_Chuncks_Mods-Void_Crew_VR_UI_Fix");
+
+        // Turned off by hand, it still loads while the VR UI Fix is on.
+        service.Library.Update(vr.Id, m => m.Enabled = false);
+        Assert.Contains(await service.PlayModsAsync(), m => m.Id == vr.Id);
+
+        // A copy you already have (imported from Rai Pal, say) is used instead of a second one.
+        service.Mods.Uninstall(vr.Id);
+        service.Library.AddOrReplace(new InstalledMod { Id = "local-vr", Source = ModSource.Local, Name = "VR", Version = "0.4.0", PluginGuids = new List<string> { BridgeDefaults.PluginGuid } });
+        Assert.Empty(await service.AddMissingGitHubModsAsync(null));
+        Assert.Null(service.Library.Find(vr.Id));
     }
 
     [Fact]

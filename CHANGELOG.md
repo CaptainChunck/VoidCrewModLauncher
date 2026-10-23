@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0
+
+- **UUVR comes with the VR UI Fix:** installing or turning on the Void Crew VR UI Fix also installs the newest UUVR
+  (Universal Unity VR by Raicuparta) from its GitHub releases: the Mono "modern" build Void Crew needs, checked
+  against GitHub's checksum and for UUVR's plugin. It then updates like your other mods, and loads whenever the VR UI
+  Fix is on. If you already have UUVR (imported from Rai Pal, say), that copy is used instead of a second one.
+
 ## 0.3.0
 
 - **Newer versions from GitHub:** for a mod whose Thunderstore page links its GitHub repo, the launcher also checks the
