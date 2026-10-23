@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.1
+
+- **Fixed: Void Crew crashed when "minimise the game while browsing" was on.** Minimised while it loads, Void Crew
+  loses its graphics device and crashes. The launcher no longer minimises the game: the option is now KEEP THE
+  LAUNCHER IN FRONT WHILE BROWSING, which brings the launcher in front of the game when it starts and again when its
+  main menu comes up.
+
 ## 0.6.0
 
 - **voidcrewmod.com first:** once the site's mod list is up, its mods come before Thunderstore's. For a mod on both,

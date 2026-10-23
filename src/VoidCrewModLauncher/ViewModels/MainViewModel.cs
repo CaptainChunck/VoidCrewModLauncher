@@ -169,6 +169,9 @@ public partial class MainViewModel : ObservableObject
         Host.NotifyCommands();
     }
 
+    /// <summary>The launch for which the launcher was put in front of the game's main menu.</summary>
+    private DateTime? _frontedLaunch;
+
     /// <summary>The launch whose game process has been seen; once it has, the process going away means the game closed.</summary>
     private DateTime? _seenLaunch;
 
@@ -194,6 +197,13 @@ public partial class MainViewModel : ObservableObject
                 null => GameState.Booting,
                 _ => GameState.Loading,
             };
+        }
+        // The game takes the front again when its main menu comes up: put the launcher back on top once per launch.
+        if (next == GameState.Menu && GameState != GameState.Menu && Service.LastLaunchMode == LaunchMode.Browse
+            && Service.Settings.MinimizeGameWhenBrowsing && _frontedLaunch != Service.LastLaunchUtc)
+        {
+            _frontedLaunch = Service.LastLaunchUtc;
+            ShowWindow();
         }
         GameState = next;
         GameStateText = next switch
@@ -236,7 +246,8 @@ public partial class MainViewModel : ObservableObject
     private void OnGameConnected(HelloMessage hello)
     {
         UpdateGameState();
-        if (Service.LastLaunchMode == LaunchMode.Browse && Service.Settings.MinimizeGameWhenBrowsing) GameProcess.Minimize(hello.ProcessId);
+        // Never minimise the game: Void Crew loses its graphics device (and crashes) when minimised while it loads.
+        if (Service.LastLaunchMode == LaunchMode.Browse && Service.Settings.MinimizeGameWhenBrowsing) ShowWindow();
         if (Service.CurrentLaunch == null)
         {
             SetStatus("Void Crew is connected, but it wasn't started by this launcher session; its mod list is unknown.");

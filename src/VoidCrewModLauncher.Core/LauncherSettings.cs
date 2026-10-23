@@ -15,7 +15,10 @@ public sealed class LauncherSettings
     /// <summary>Shared secret between the launcher and the bridge; made once per install.</summary>
     public string BridgeToken { get; set; } = "";
 
-    /// <summary>Minimise Void Crew when it was started only to fill the server browser.</summary>
+    /// <summary>
+    /// When Void Crew was started only to fill the server browser, keep the launcher in front of it. (The name is from
+    /// when it minimised the game, which crashes Void Crew while it loads.)
+    /// </summary>
     public bool MinimizeGameWhenBrowsing { get; set; }
 
     /// <summary>Show BepInEx's log console window next to the game.</summary>

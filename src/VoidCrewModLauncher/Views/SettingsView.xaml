@@ -42,7 +42,7 @@
                 <HeaderedContentControl Style="{StaticResource Section}" Header="SERVER BROWSER" Margin="0,24,0,0">
                     <DockPanel>
                         <CheckBox DockPanel.Dock="Right" Style="{StaticResource Switch}" IsChecked="{Binding MinimizeWhenBrowsing}" VerticalAlignment="Center" />
-                        <TextBlock Text="MINIMISE THE GAME WHILE BROWSING" Style="{StaticResource Label}" VerticalAlignment="Center" Margin="0" />
+                        <TextBlock Text="KEEP THE LAUNCHER IN FRONT WHILE BROWSING" Style="{StaticResource Label}" VerticalAlignment="Center" Margin="0" />
                     </DockPanel>
                 </HeaderedContentControl>
 

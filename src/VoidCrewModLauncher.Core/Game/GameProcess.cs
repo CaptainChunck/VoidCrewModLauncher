@@ -85,12 +85,6 @@ public static class GameProcess
         SetForegroundWindow(window);
     }
 
-    public static void Minimize(int processId)
-    {
-        IntPtr window = MainWindow(processId);
-        if (window != IntPtr.Zero) ShowWindow(window, SwMinimize);
-    }
-
     private static IntPtr MainWindow(int processId)
     {
         try
@@ -104,7 +98,6 @@ public static class GameProcess
         }
     }
 
-    private const int SwMinimize = 6;
     private const int SwRestore = 9;
 
     [DllImport("user32.dll")]

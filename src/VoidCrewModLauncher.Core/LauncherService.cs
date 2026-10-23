@@ -15,7 +15,7 @@ public enum LaunchMode
     /// <summary>Play with the mods turned on in the INSTALLED tab.</summary>
     Play,
 
-    /// <summary>Same mods as Play, started to fill the server browser (minimised if the player wants).</summary>
+    /// <summary>Same mods as Play, started to fill the server browser (the launcher stays in front if the player wants).</summary>
     Browse,
 
     /// <summary>Play's mods, then host a lobby with the HOST tab's settings.</summary>

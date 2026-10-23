@@ -176,7 +176,7 @@
                             <TextBlock Text="{Binding OverlayText}" Style="{StaticResource Body}" TextAlignment="Center" />
                             <Button Style="{StaticResource LargeButton}" Content="START VOID CREW" Command="{Binding StartGameCommand}" HorizontalAlignment="Center" Margin="0,20,0,0"
                                     Visibility="{Binding ShowStartButton, Converter={StaticResource Show}}" />
-                            <CheckBox Content="Minimise the game while I browse" IsChecked="{Binding MinimizeWhenBrowsing}" HorizontalAlignment="Center" Margin="0,14,0,0"
+                            <CheckBox Content="Keep the launcher in front while I browse" IsChecked="{Binding MinimizeWhenBrowsing}" HorizontalAlignment="Center" Margin="0,14,0,0"
                                       Visibility="{Binding ShowStartButton, Converter={StaticResource Show}}" />
                             <Button Style="{StaticResource PrimaryButton}" Content="RESTART FROM THE LAUNCHER" Command="{Binding RestartFromLauncherCommand}" HorizontalAlignment="Center" Margin="0,20,0,0"
                                     Visibility="{Binding ShowRestartButton, Converter={StaticResource Show}}" />
