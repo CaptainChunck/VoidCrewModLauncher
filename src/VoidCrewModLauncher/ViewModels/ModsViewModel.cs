@@ -325,7 +325,9 @@ public partial class ModsViewModel : ObservableObject
 
     private async Task LoadReadmeAsync(TsPackage package, TsVersion version, int request)
     {
-        string? markdown = await _main.Service.Thunderstore.GetReadmeAsync(package.Owner, package.Name, version.VersionNumber);
+        // A version from voidcrewmod.com has its README there (same API as Thunderstore's).
+        string? site = version.FromWebsite ? Core.Website.WebsiteClient.Site : null;
+        string? markdown = await _main.Service.Thunderstore.GetReadmeAsync(package.Owner, package.Name, version.VersionNumber, site);
         _main.OnUi(() =>
         {
             if (request == _readmeRequest) Readme = Markdown.ToDocument(markdown ?? version.Description);

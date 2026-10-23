@@ -65,6 +65,18 @@ public class WebsiteTests
     }
 
     [Fact]
+    public async Task A_website_mods_readme_comes_from_the_website()
+    {
+        using var temp = new TempFolder();
+        var http = new FakeHttp()
+            .On($"{WebsiteClient.Site}/api/experimental/package/Someone/Site_Only/1.0.0/readme/", "{\"markdown\":\"# From the site\"}")
+            .On("https://thunderstore.io/api/experimental/package/Someone/Other/1.0.0/readme/", "{\"markdown\":\"# From Thunderstore\"}");
+        using var client = new ThunderstoreClient(temp.AppPaths(), http);
+        Assert.Equal("# From the site", await client.GetReadmeAsync("Someone", "Site_Only", "1.0.0", WebsiteClient.Site));
+        Assert.Equal("# From Thunderstore", await client.GetReadmeAsync("Someone", "Other", "1.0.0"));
+    }
+
+    [Fact]
     public async Task Without_the_website_Thunderstore_covers_everything()
     {
         using var temp = new TempFolder();

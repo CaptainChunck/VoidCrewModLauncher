@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.2
+
+- Mods from voidcrewmod.com show their README from the site in MODS (it was only read from Thunderstore).
+
 ## 0.6.1
 
 - **Fixed: Void Crew crashed when "minimise the game while browsing" was on.** Minimised while it loads, Void Crew

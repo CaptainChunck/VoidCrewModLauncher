@@ -298,15 +298,19 @@ public sealed class ThunderstoreClient : IDisposable
         return target;
     }
 
-    /// <summary>The package's README (markdown) for one version, or null.</summary>
-    public Task<string?> GetReadmeAsync(string owner, string name, string version)
+    /// <summary>
+    /// The package's README (markdown) for one version, or null. <paramref name="site"/> is another site with
+    /// Thunderstore's API (voidcrewmod.com for its own mods); Thunderstore when null.
+    /// </summary>
+    public Task<string?> GetReadmeAsync(string owner, string name, string version, string? site = null)
     {
-        string key = $"{owner}/{name}/{version}";
+        site ??= Site;
+        string key = $"{site}/{owner}/{name}/{version}";
         return _readmes.GetOrAdd(key, async _ =>
         {
             try
             {
-                string url = $"{Site}/api/experimental/package/{Uri.EscapeDataString(owner)}/{Uri.EscapeDataString(name)}/{Uri.EscapeDataString(version)}/readme/";
+                string url = $"{site}/api/experimental/package/{Uri.EscapeDataString(owner)}/{Uri.EscapeDataString(name)}/{Uri.EscapeDataString(version)}/readme/";
                 using JsonDocument document = JsonDocument.Parse(await _http.GetStringAsync(url));
                 return document.RootElement.TryGetProperty("markdown", out JsonElement markdown) ? markdown.GetString() : null;
             }
