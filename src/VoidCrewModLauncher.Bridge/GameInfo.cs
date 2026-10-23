@@ -288,15 +288,37 @@ namespace VoidCrewModLauncher.Bridge
                     int roomHash = info.Name.GetHashCode() * 31 + info.PlayerCount;
                     roomHash = roomHash * 31 + info.MaxPlayers;
                     roomHash = roomHash * 31 + (info.IsOpen ? 1 : 0) + (info.IsVisible ? 2 : 0);
-                    roomHash = roomHash * 31 + info.CustomProperties.Count;
-                    object value;
-                    if (info.CustomProperties.TryGetValue("R_IH", out value) && value is bool && (bool)value) roomHash += 7;
-                    if (info.CustomProperties.TryGetValue("R_Na", out value) && value is string) roomHash = roomHash * 31 + value.GetHashCode();
-                    if (info.CustomProperties.TryGetValue(LobbyAdvert.PropertyKey, out value) && value != null) roomHash = roomHash * 31 + value.GetHashCode();
-                    hash ^= roomHash;
+                    // Every listed property counts (roles, rank, quest, mutators, mod lists), whatever order Photon keeps them in.
+                    int properties = 0;
+                    foreach (var property in info.CustomProperties)
+                    {
+                        properties += (property.Key != null ? property.Key.GetHashCode() : 0) * 31 + ValueHash(property.Value);
+                    }
+                    roomHash = roomHash * 31 + properties;
+                    hash += roomHash * -1640531535;
                 }
                 return hash;
             }
+        }
+
+        private static int ValueHash(object value)
+        {
+            if (value == null) return 0;
+            var bytes = value as byte[];
+            if (bytes != null)
+            {
+                int hash = bytes.Length;
+                unchecked { foreach (byte b in bytes) hash = hash * 31 + b; }
+                return hash;
+            }
+            var array = value as Array;
+            if (array != null)
+            {
+                int hash = array.Length;
+                unchecked { foreach (object item in array) hash = hash * 31 + ValueHash(item); }
+                return hash;
+            }
+            return value.GetHashCode();
         }
 
         private static RoomDto ToDto(RoomInfo info, MatchmakingRoom room, Platform myPlatform)

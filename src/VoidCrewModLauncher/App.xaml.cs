@@ -20,8 +20,9 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        string? dataDir = Argument(e.Args, "--data-dir");
-        string? previews = Argument(e.Args, "--render-previews");
+        string[] args = StartArguments(e.Args);
+        string? dataDir = Argument(args, "--data-dir");
+        string? previews = Argument(args, "--render-previews");
 
         if (previews != null)
         {
@@ -33,36 +34,36 @@ public partial class App : Application
 
         // A downloaded update installing itself over the launcher that downloaded it (see Installer.StartUpdate).
         var locations = InstallLocations.ForThisUser();
-        int apply = Array.FindIndex(e.Args, a => a.Equals(Installer.ApplyUpdateArgument, StringComparison.OrdinalIgnoreCase));
+        int apply = Array.FindIndex(args, a => a.Equals(Installer.ApplyUpdateArgument, StringComparison.OrdinalIgnoreCase));
         if (apply >= 0)
         {
             ShutdownMode = ShutdownMode.OnExplicitShutdown;
-            RunApplyUpdate(e.Args[(apply + 1)..], locations);
+            RunApplyUpdate(args[(apply + 1)..], locations);
             Shutdown();
             return;
         }
 
         // The release exe installs itself on its first start (the one-click install), and uninstalls from Windows' apps list.
-        if (e.Args.Any(a => a.Equals("--uninstall", StringComparison.OrdinalIgnoreCase)))
+        if (args.Any(a => a.Equals("--uninstall", StringComparison.OrdinalIgnoreCase)))
         {
             ShutdownMode = ShutdownMode.OnExplicitShutdown;
             RunUninstall(locations, dataDir);
             Shutdown();
             return;
         }
-        if (Installer.ShouldInstall(e.Args, locations) && RunInstall(locations))
+        if (Installer.ShouldInstall(args, locations) && RunInstall(locations))
         {
             Shutdown();
             return;
         }
 
         // A voidcrewmod:// link (a website's "download with the Mod Launcher") starts the launcher with the link.
-        string? link = LauncherLinks.FindIn(e.Args);
+        string? link = LauncherLinks.FindIn(args);
         _single = new Mutex(true, "VoidCrewModLauncher-" + Environment.UserName, out bool first);
         if (!first)
         {
-            // The launcher is open: it handles the link.
-            if (link != null && LinkPipe.SendAsync(link).GetAwaiter().GetResult())
+            // The launcher is open: it handles the link (sent off the UI thread, so a busy launcher can't hang this one).
+            if (link != null && SendLink(link))
             {
                 Shutdown();
                 return;
@@ -83,10 +84,23 @@ public partial class App : Application
             args.SetObserved();
         };
 
-        _service = new LauncherService(paths);
+        try
+        {
+            _service = new LauncherService(paths);
+        }
+        catch (IOException ex)
+        {
+            // settings.json or library.json can't be read right now (another program has it open). Starting anyway
+            // would mean starting from empty files and saving them over the player's.
+            AppLog.Error("Could not read the launcher's files", ex);
+            MessageBox.Show($"The launcher can't read its files right now:\n{ex.Message}\n\nClose any program that might have them open, then start the launcher again.",
+                AppInfo.Name, MessageBoxButton.OK, MessageBoxImage.Warning);
+            Shutdown();
+            return;
+        }
         _service.Start();
         var dialogs = new Dialogs();
-        var model = new MainViewModel(_service, dialogs) { LauncherArguments = LauncherArguments(e.Args) };
+        var model = new MainViewModel(_service, dialogs) { LauncherArguments = LauncherArguments(args) };
         var window = new MainWindow { DataContext = model };
         dialogs.Owner = window;
         MainWindow = window;
@@ -94,7 +108,40 @@ public partial class App : Application
         _links = new LinkPipe();
         _links.Start(received => Dispatcher.BeginInvoke(() => _ = model.HandleLinkAsync(received)));
         RegisterLinks(locations);
-        _ = model.StartAsync(Argument(e.Args, Installer.UpdatedArgument), link);
+        _ = model.StartAsync(Argument(args, Installer.UpdatedArgument), link);
+    }
+
+    /// <summary>The marker before a link the launcher passes to itself when it restarts after a self-update.</summary>
+    private const string LinkArgument = "--link";
+
+    /// <summary>
+    /// A start by a voidcrewmod:// link has the link and nothing else: a link handler that doesn't quote it can split one
+    /// link into several arguments, so every switch is ignored then. Only the launcher's own restart (after a
+    /// self-update) passes a link along with switches, after <see cref="LinkArgument"/>.
+    /// </summary>
+    private static string[] StartArguments(string[] args)
+    {
+        for (int i = 0; i < args.Length; i++)
+        {
+            if (!args[i].StartsWith(LauncherLinks.Scheme + ":", StringComparison.OrdinalIgnoreCase)) continue;
+            if (i > 0 && args[i - 1].Equals(LinkArgument, StringComparison.OrdinalIgnoreCase)) continue;
+            return new[] { args[i] };
+        }
+        return args;
+    }
+
+    /// <summary>Gives the link to the open launcher; false when it doesn't take it within a few seconds.</summary>
+    private static bool SendLink(string link)
+    {
+        try
+        {
+            Task<bool> send = Task.Run(() => LinkPipe.SendAsync(link));
+            return send.Wait(TimeSpan.FromSeconds(5)) && send.Result;
+        }
+        catch (AggregateException)
+        {
+            return false;
+        }
     }
 
     private LinkPipe? _links;
@@ -125,7 +172,7 @@ public partial class App : Application
         if (args.Any(a => a.Equals("--portable", StringComparison.OrdinalIgnoreCase))) kept.Add("--portable");
         if (Argument(args, "--data-dir") is { } dataDir) kept.AddRange(new[] { "--data-dir", dataDir });
         // A link that started this launcher is handled after the update instead.
-        if (LauncherLinks.FindIn(args) is { } link) kept.Add(link);
+        if (LauncherLinks.FindIn(args) is { } link) kept.AddRange(new[] { LinkArgument, link });
         return kept;
     }
 

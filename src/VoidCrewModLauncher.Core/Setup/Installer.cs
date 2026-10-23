@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using Microsoft.Win32;
 using VoidCrewModLauncher.Core.Game;
+using VoidCrewModLauncher.Core.Mods;
+using VoidCrewModLauncher.Core.Thunderstore;
 
 namespace VoidCrewModLauncher.Core.Setup;
 
@@ -176,6 +178,7 @@ public static class Installer
     /// </summary>
     public static void ApplyUpdate(string sourceExe, int oldProcessId, string target, InstallLocations locations, string version)
     {
+        CheckUpdateTarget(target);
         try
         {
             using Process old = Process.GetProcessById(oldProcessId);
@@ -188,6 +191,26 @@ public static class Installer
         if (SamePath(target, locations.InstalledExe)) Install(sourceExe, locations, version);
         else CopyExe(sourceExe, target);
         AppLog.Info($"Updated the launcher at {target} to {version}.");
+    }
+
+    /// <summary>
+    /// Throws unless <paramref name="target"/> can be this launcher's exe: a full path to VoidCrewModLauncher*.exe, and,
+    /// when the file is there and has version info, one whose product is this launcher. Anything else started with
+    /// --apply-update is never overwritten.
+    /// </summary>
+    public static void CheckUpdateTarget(string target)
+    {
+        if (string.IsNullOrWhiteSpace(target) || !Path.IsPathFullyQualified(target)) throw new InvalidDataException("The launcher to update isn't a full path.");
+        string name = Path.GetFileName(target);
+        if (!name.StartsWith("VoidCrewModLauncher", StringComparison.OrdinalIgnoreCase) || !name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException($"{name} isn't the launcher's exe.");
+        }
+        if (Directory.Exists(target)) throw new InvalidDataException($"{name} is a folder.");
+        if (!File.Exists(target)) return;
+        // Files without version info (stand-ins in tests) pass on their name; a real exe must say it is the launcher.
+        string? product = FileVersionInfo.GetVersionInfo(target).ProductName;
+        if (!string.IsNullOrEmpty(product) && product != AppInfo.Name) throw new InvalidDataException($"{name} is {product}, not the {AppInfo.Name}.");
     }
 
     /// <summary>
@@ -204,33 +227,48 @@ public static class Installer
 
         if (gameDirectory != null && Doorstop.Inspect(gameDirectory).InstalledByLauncher)
         {
-            foreach (string file in new[] { Doorstop.ProxyFile, Doorstop.ConfigFile, Doorstop.VersionFile }) TryDelete(Path.Combine(gameDirectory, file));
-        }
-        if (dataDirectory != null && Directory.Exists(dataDirectory))
-        {
-            try
+            IEnumerable<string>? packs = null;
+            if (dataDirectory != null)
             {
-                Directory.Delete(dataDirectory, true);
+                string packVersions = Path.Combine(new AppPaths(dataDirectory).Store, PackageStore.SafeName(PackageIndex.BepInExPackId));
+                if (Directory.Exists(packVersions)) packs = Directory.GetDirectories(packVersions);
             }
-            catch (IOException e)
-            {
-                AppLog.Warn($"Could not delete {dataDirectory}: {e.Message}");
-            }
+            Doorstop.Remove(gameDirectory, packs);
         }
+        // Only the launcher's own files: the data folder can be any folder the player chose (--data-dir).
+        if (dataDirectory != null) new AppPaths(dataDirectory).DeleteOwnFiles();
 
-        if (Directory.Exists(locations.InstallDirectory))
+        if (IsInstallDirectory(locations))
         {
-            // The exe is running; a hidden cmd deletes the folder once it has exited.
-            var cleanup = new ProcessStartInfo("cmd.exe")
+            // The exe is running; a hidden cmd deletes the folder once it has exited. One raw command line: cmd doesn't
+            // understand the \" escaping ArgumentList would add around the path.
+            string folder = Path.GetFullPath(locations.InstallDirectory).TrimEnd('\\');
+            var cleanup = new ProcessStartInfo("cmd.exe", $"/c ping 127.0.0.1 -n 4 > nul & rmdir /s /q \"{folder}\"")
             {
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 WindowStyle = ProcessWindowStyle.Hidden,
             };
-            cleanup.ArgumentList.Add("/c");
-            cleanup.ArgumentList.Add($"ping 127.0.0.1 -n 4 > nul & rmdir /s /q \"{locations.InstallDirectory}\"");
             Process.Start(cleanup)?.Dispose();
         }
+        else if (Directory.Exists(locations.InstallDirectory))
+        {
+            AppLog.Warn($"Not deleting {locations.InstallDirectory}: it doesn't look like the launcher's install folder.");
+        }
+    }
+
+    /// <summary>
+    /// Whether the install folder is safe to delete as a whole: a full path ending in \VoidCrewModLauncher that holds the
+    /// launcher's exe, not a drive root, and nothing cmd would read as more than a path (quotes, %).
+    /// </summary>
+    internal static bool IsInstallDirectory(InstallLocations locations)
+    {
+        string dir = locations.InstallDirectory;
+        if (string.IsNullOrWhiteSpace(dir) || dir.IndexOfAny(new[] { '"', '%', '\r', '\n' }) >= 0 || !Path.IsPathFullyQualified(dir)) return false;
+        string full = Path.GetFullPath(dir).TrimEnd('\\');
+        if (Path.GetPathRoot(full) is { } root && SamePath(full, root)) return false;
+        if (!full.EndsWith(@"\VoidCrewModLauncher", StringComparison.OrdinalIgnoreCase)) return false;
+        return Directory.Exists(full) && File.Exists(Path.Combine(full, InstallLocations.ExeName));
     }
 
     /// <summary>A .lnk shortcut through Windows' own shell object.</summary>

@@ -98,7 +98,7 @@ public sealed class PackageStore
 
         string basis = VersionDirectory(reference.Id, github.Base!.VersionNumber);
         string temp = target + ".patching";
-        if (Directory.Exists(temp)) Directory.Delete(temp, true);
+        FileTools.DeleteDirectory(temp);
         CopyDirectory(basis, temp);
         foreach (GitHubAsset plugin in github.Plugins)
         {
@@ -109,17 +109,17 @@ public sealed class PackageStore
                     .Where(f => string.Equals(Path.GetFileName(f), plugin.Name, StringComparison.OrdinalIgnoreCase)).ToList();
                 if (same.Count == 0)
                 {
-                    Directory.Delete(temp, true);
+                    FileTools.DeleteDirectory(temp);
                     throw new InvalidDataException($"{plugin.Name} in {github.Repo}'s release isn't a file of {reference.Id}; not using that release.");
                 }
-                foreach (string existing in same) File.Copy(file, existing, true);
+                foreach (string existing in same) FileTools.CopyFile(file, existing);
             }
             finally
             {
                 TryDelete(file);
             }
         }
-        if (Directory.Exists(target)) Directory.Delete(target, true);
+        FileTools.DeleteDirectory(target);
         Directory.Move(temp, target);
     }
 
@@ -175,38 +175,83 @@ public sealed class PackageStore
         }
         foreach (string file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
         {
-            File.Copy(file, Path.Combine(target, Path.GetRelativePath(source, file)), true);
+            FileTools.CopyFile(file, Path.Combine(target, Path.GetRelativePath(source, file)));
         }
     }
+
+    /// <summary>The most a package may unpack to, and the most files it may have; anything bigger isn't a Void Crew mod.</summary>
+    public const long MaxUnpackedBytes = 2L * 1024 * 1024 * 1024;
+
+    public const int MaxEntries = 20_000;
 
     /// <summary>
     /// Unpacks a zip into <paramref name="target"/>, refusing entries that would land outside it. <paramref name="check"/>
     /// looks at the unpacked files before they're moved into place (and can refuse them by throwing).
     /// </summary>
-    public static void Unpack(string zip, string target, Action<string>? check = null)
+    public static void Unpack(string zip, string target, Action<string>? check = null) => Unpack(zip, target, check, MaxUnpackedBytes, MaxEntries);
+
+    /// <summary><see cref="Unpack(string, string, Action{string}?)"/> with other size limits (tests).</summary>
+    internal static void Unpack(string zip, string target, Action<string>? check, long maxBytes, int maxEntries)
     {
         string temp = target + ".unpacking";
-        if (Directory.Exists(temp)) Directory.Delete(temp, true);
-        Directory.CreateDirectory(temp);
-        string root = Path.GetFullPath(temp) + Path.DirectorySeparatorChar;
+        FileTools.DeleteDirectory(temp);
         using (ZipArchive archive = ZipFile.OpenRead(zip))
         {
-            foreach (ZipArchiveEntry entry in archive.Entries)
+            // Refused before anything is written: a zip bomb, or something that isn't a mod.
+            long declared = 0;
+            foreach (ZipArchiveEntry entry in archive.Entries) declared += entry.Length;
+            if (archive.Entries.Count > maxEntries || declared > maxBytes)
             {
-                string name = entry.FullName.Replace('\\', '/');
-                if (name.Length == 0) continue;
-                string destination = Path.GetFullPath(Path.Combine(temp, name));
-                if (!destination.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException($"{Path.GetFileName(zip)} is too big to be a mod ({archive.Entries.Count} files, {declared / (1024 * 1024)} MB); not installing it.");
+            }
+
+            Directory.CreateDirectory(temp);
+            string root = Path.GetFullPath(temp) + Path.DirectorySeparatorChar;
+            try
+            {
+                long written = 0;
+                byte[] buffer = new byte[81920];
+                foreach (ZipArchiveEntry entry in archive.Entries)
                 {
-                    throw new InvalidDataException($"{Path.GetFileName(zip)} has a file that would be written outside its folder ({entry.FullName}); not installing it.");
+                    string name = entry.FullName.Replace('\\', '/');
+                    if (name.Length == 0) continue;
+                    string destination = Path.GetFullPath(Path.Combine(temp, name));
+                    if (!destination.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new InvalidDataException($"{Path.GetFileName(zip)} has a file that would be written outside its folder ({entry.FullName}); not installing it.");
+                    }
+                    if (name.EndsWith('/'))
+                    {
+                        Directory.CreateDirectory(destination);
+                        continue;
+                    }
+                    Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                    // Counted while writing too: an entry can unpack to more than its header says.
+                    using (Stream input = entry.Open())
+                    using (var output = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None))
+                    {
+                        int read;
+                        while ((read = input.Read(buffer, 0, buffer.Length)) > 0)
+                        {
+                            written += read;
+                            if (written > maxBytes) throw new InvalidDataException($"{Path.GetFileName(zip)} unpacks to more than {maxBytes / (1024 * 1024)} MB; not installing it.");
+                            output.Write(buffer, 0, read);
+                        }
+                    }
+                    try
+                    {
+                        File.SetLastWriteTime(destination, entry.LastWriteTime.DateTime);
+                    }
+                    catch (ArgumentOutOfRangeException)
+                    {
+                        // A zip with no usable date; the file keeps today's.
+                    }
                 }
-                if (name.EndsWith('/'))
-                {
-                    Directory.CreateDirectory(destination);
-                    continue;
-                }
-                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                entry.ExtractToFile(destination, true);
+            }
+            catch
+            {
+                FileTools.TryDeleteDirectory(temp);
+                throw;
             }
         }
         try
@@ -215,10 +260,10 @@ public sealed class PackageStore
         }
         catch
         {
-            Directory.Delete(temp, true);
+            FileTools.TryDeleteDirectory(temp);
             throw;
         }
-        if (Directory.Exists(target)) Directory.Delete(target, true);
+        FileTools.DeleteDirectory(target);
         Directory.CreateDirectory(Path.GetDirectoryName(target)!);
         Directory.Move(temp, target);
     }
@@ -228,15 +273,16 @@ public sealed class PackageStore
     {
         string target = VersionDirectory(id, version);
         string temp = target + ".adding";
-        if (Directory.Exists(temp)) Directory.Delete(temp, true);
+        FileTools.DeleteDirectory(temp);
         foreach ((string source, string relative) in files)
         {
             string destination = Path.Combine(temp, relative);
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-            File.Copy(source, destination, true);
+            // Without the source's read-only mark (a git clone's), which would block later updates and deletes.
+            FileTools.CopyFile(source, destination);
         }
         Directory.CreateDirectory(temp);
-        if (Directory.Exists(target)) Directory.Delete(target, true);
+        FileTools.DeleteDirectory(target);
         Directory.CreateDirectory(Path.GetDirectoryName(target)!);
         Directory.Move(temp, target);
         return target;
@@ -245,9 +291,10 @@ public sealed class PackageStore
     public void RemoveAll(string id)
     {
         string dir = Path.Combine(_paths.Store, SafeName(id));
-        if (Directory.Exists(dir)) TryDeleteDirectory(dir);
+        FileTools.TryDeleteDirectory(dir);
     }
 
+    /// <summary>A name that is safe as one file or folder name (no path separators, never "." or "..").</summary>
     public static string SafeName(string name)
     {
         char[] invalid = Path.GetInvalidFileNameChars();
@@ -264,18 +311,6 @@ public sealed class PackageStore
         catch
         {
             // Left in cache\downloads; harmless.
-        }
-    }
-
-    private static void TryDeleteDirectory(string dir)
-    {
-        try
-        {
-            Directory.Delete(dir, true);
-        }
-        catch (Exception e)
-        {
-            AppLog.Warn($"Could not delete {dir}: {e.Message}");
         }
     }
 }

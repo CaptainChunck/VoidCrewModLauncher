@@ -63,11 +63,23 @@ public sealed class GitHubClient : IDisposable
     private static readonly TimeSpan FreshFor = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan KeptFor = TimeSpan.FromDays(14);
 
+    /// <summary>How long one API request may take (release downloads have the client's longer timeout).</summary>
+    internal static readonly TimeSpan ApiTimeout = TimeSpan.FromSeconds(20);
+
+    /// <summary>github.json is written this long after a change, so a batch of lookups writes it once.</summary>
+    private static readonly TimeSpan SaveDelay = TimeSpan.FromSeconds(2);
+
+    /// <summary>How many answers are kept (lobbies name versions to look up, so this mustn't grow forever).</summary>
+    private const int MaxAnswers = 500;
+
     private readonly AppPaths _paths;
     private readonly HttpClient _http;
-    private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly object _cacheLock = new();
+    private readonly SemaphoreSlim _requests = new(4, 4);
     private Dictionary<string, CachedAnswer>? _cache;
     private DateTime _limitedUntil;
+    private bool _saveQueued;
+    private bool _disposed;
 
     public GitHubClient(AppPaths paths, HttpMessageHandler? handler = null)
     {
@@ -77,6 +89,9 @@ public sealed class GitHubClient : IDisposable
         _http.DefaultRequestHeaders.UserAgent.ParseAdd(AppInfo.UserAgent);
         _http.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
     }
+
+    /// <summary>A download fails when nothing arrives for this long (the client's timeout doesn't cover reading the body).</summary>
+    internal TimeSpan StallTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
     private string CacheFile => Path.Combine(_paths.Cache, "github.json");
 
@@ -95,52 +110,86 @@ public sealed class GitHubClient : IDisposable
     /// </summary>
     public async Task<JsonDocument?> GetAsync(string path, CancellationToken cancel = default)
     {
-        await _gate.WaitAsync(cancel);
-        CachedAnswer? cached = null;
-        try
+        CachedAnswer? cached;
+        DateTime now = DateTime.UtcNow;
+        lock (_cacheLock)
         {
             _cache ??= LoadCache();
             _cache.TryGetValue(path, out cached);
-            DateTime now = DateTime.UtcNow;
-            if (cached != null && (now - cached.FetchedUtc < FreshFor || now < _limitedUntil)) return Parse(cached);
+            if (cached != null && (now - cached.FetchedUtc < FreshFor || now < _limitedUntil)) return Parse(path, cached);
             if (now < _limitedUntil) return null;
+        }
 
+        // A few at a time: the launcher checks several mods at once.
+        await _requests.WaitAsync(cancel);
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+            timeout.CancelAfter(ApiTimeout);
             using var request = new HttpRequestMessage(HttpMethod.Get, Api + path);
             if (cached?.ETag != null) request.Headers.TryAddWithoutValidation("If-None-Match", cached.ETag);
-            using HttpResponseMessage response = await _http.SendAsync(request, cancel);
+            using HttpResponseMessage response = await _http.SendAsync(request, timeout.Token);
             if (response.StatusCode == HttpStatusCode.NotModified && cached != null)
             {
-                cached.FetchedUtc = now;
-                SaveCache();
-                return Parse(cached);
+                lock (_cacheLock) cached.FetchedUtc = now;
+                SaveSoon();
+                return Parse(path, cached);
             }
-            if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests)
+            if (IsRateLimited(response))
             {
-                _limitedUntil = ResetTime(response) ?? now.AddMinutes(15);
-                AppLog.Warn($"GitHub's limit for requests without an account is used up until {_limitedUntil.ToLocalTime():t}; using what the launcher already knows.");
-                return cached != null ? Parse(cached) : null;
+                DateTime until = ResetTime(response) ?? now.AddMinutes(15);
+                lock (_cacheLock) _limitedUntil = until;
+                AppLog.Warn($"GitHub's limit for requests without an account is used up until {until.ToLocalTime():t}; using what the launcher already knows.");
+                return cached != null ? Parse(path, cached) : null;
             }
             if (response.StatusCode == HttpStatusCode.NotFound)
             {
-                _cache[path] = new CachedAnswer { Missing = true, FetchedUtc = now };
-                SaveCache();
+                Keep(path, new CachedAnswer { Missing = true, FetchedUtc = now });
                 return null;
             }
             response.EnsureSuccessStatusCode();
-            string body = await response.Content.ReadAsStringAsync(cancel);
-            _cache[path] = new CachedAnswer { ETag = response.Headers.ETag?.ToString(), Body = body, FetchedUtc = now };
-            SaveCache();
-            return JsonDocument.Parse(body);
+            string body = await response.Content.ReadAsStringAsync(timeout.Token);
+            // Read before it is kept: an answer that isn't JSON is never cached.
+            JsonDocument document = JsonDocument.Parse(body);
+            Keep(path, new CachedAnswer { ETag = response.Headers.ETag?.ToString(), Body = body, FetchedUtc = now });
+            return document;
         }
         catch (Exception e) when (e is not OperationCanceledException || !cancel.IsCancellationRequested)
         {
             AppLog.Warn($"GitHub {path}: {e.Message}");
-            return cached != null ? Parse(cached) : null;
+            return cached != null ? Parse(path, cached) : null;
         }
         finally
         {
-            _gate.Release();
+            _requests.Release();
         }
+    }
+
+    /// <summary>
+    /// GitHub's limit for requests without an account: 429, or a 403 that says no requests are left (or when to try
+    /// again). Other 403s (a blocked repo, say) are only that answer failing.
+    /// </summary>
+    private static bool IsRateLimited(HttpResponseMessage response)
+    {
+        if (response.StatusCode == HttpStatusCode.TooManyRequests) return true;
+        if (response.StatusCode != HttpStatusCode.Forbidden) return false;
+        if (response.Headers.RetryAfter != null) return true;
+        return response.Headers.TryGetValues("x-ratelimit-remaining", out IEnumerable<string>? values) && values.FirstOrDefault()?.Trim() == "0";
+    }
+
+    /// <summary>Keeps an answer (dropping the oldest ones past <see cref="MaxAnswers"/>) and saves the cache soon.</summary>
+    private void Keep(string path, CachedAnswer answer)
+    {
+        lock (_cacheLock)
+        {
+            _cache ??= LoadCache();
+            _cache[path] = answer;
+            if (_cache.Count > MaxAnswers)
+            {
+                foreach (string old in _cache.OrderBy(p => p.Value.FetchedUtc).Take(_cache.Count - MaxAnswers).Select(p => p.Key).ToList()) _cache.Remove(old);
+            }
+        }
+        SaveSoon();
     }
 
     /// <summary>The repo's newest published release as a version of <paramref name="package"/>, or null.</summary>
@@ -178,6 +227,8 @@ public sealed class GitHubClient : IDisposable
     /// <summary>The release of one version (tag "v1.2.3" or "1.2.3") as a version of <paramref name="package"/>, or null.</summary>
     public async Task<TsVersion?> GetReleaseAsync(GitHubRepo repo, TsPackage package, string version, CancellationToken cancel = default)
     {
+        // The version can come from another player's lobby: only real version numbers make a tag to ask for.
+        if (!VersionNumber.IsValid(version)) return null;
         foreach (string tag in new[] { "v" + version, version })
         {
             using JsonDocument? release = await GetAsync($"/repos/{repo.Owner}/{repo.Name}/releases/tags/{Uri.EscapeDataString(tag)}", cancel);
@@ -194,7 +245,7 @@ public sealed class GitHubClient : IDisposable
     /// </summary>
     public static TsVersion? ToVersion(JsonElement release, GitHubRepo repo, TsPackage package, GitHubMod? mod = null)
     {
-        if (Bool(release, "draft") || Bool(release, "prerelease")) return null;
+        if (release.ValueKind != JsonValueKind.Object || Bool(release, "draft") || Bool(release, "prerelease")) return null;
         string version = (Text(release, "tag_name") ?? "").Trim().TrimStart('v', 'V');
         if (!IsVersion(version)) return null;
 
@@ -203,6 +254,7 @@ public sealed class GitHubClient : IDisposable
         {
             foreach (JsonElement asset in list.EnumerateArray())
             {
+                if (asset.ValueKind != JsonValueKind.Object) continue;
                 string? name = Text(asset, "name");
                 string? url = Text(asset, "browser_download_url");
                 if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(url) || Text(asset, "state") is { } state && state != "uploaded") continue;
@@ -215,7 +267,7 @@ public sealed class GitHubClient : IDisposable
 
         TsVersion? basis = mod == null ? package.LatestOnThunderstore : null;
         GitHubAsset? zip = mod != null ? PickAsset(assets, mod.Asset) : PickPackage(assets, package, repo);
-        List<GitHubAsset> plugins = zip == null && mod == null ? assets.Where(a => a.Name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)).ToList() : new List<GitHubAsset>();
+        List<GitHubAsset> plugins = zip == null && mod == null ? PickPlugins(assets, package, repo) : new List<GitHubAsset>();
         if (zip == null && (plugins.Count == 0 || basis == null)) return null;
         DateTimeOffset published = DateTimeOffset.TryParse(Text(release, "published_at"), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out DateTimeOffset at) ? at : DateTimeOffset.UtcNow;
 
@@ -254,16 +306,46 @@ public sealed class GitHubClient : IDisposable
                                              && PackageIndex.Simplify(Path.GetFileNameWithoutExtension(a.Name)).Contains(simple, StringComparison.Ordinal));
     }
 
-    /// <summary>The release's package zip: one named like the package, else like the repo, else the only zip.</summary>
+    /// <summary>
+    /// The release's package zip: one named like the package; from the package's own repo (named like it), else one named
+    /// like the repo, else the only zip. A mod's website can name a framework's repo (BepInEx) or a repo of many mods,
+    /// whose releases aren't this package.
+    /// </summary>
     private static GitHubAsset? PickPackage(List<GitHubAsset> assets, TsPackage package, GitHubRepo repo)
     {
         List<GitHubAsset> zips = assets.Where(a => a.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)).ToList();
         string packageName = PackageIndex.Simplify(package.Name);
         string repoName = PackageIndex.Simplify(repo.Name);
-        return zips.FirstOrDefault(a => packageName.Length > 0 && PackageIndex.Simplify(a.Name).Contains(packageName, StringComparison.Ordinal))
-               ?? zips.FirstOrDefault(a => repoName.Length > 0 && PackageIndex.Simplify(a.Name).Contains(repoName, StringComparison.Ordinal))
+        GitHubAsset? named = zips.FirstOrDefault(a => packageName.Length > 0 && PackageIndex.Simplify(a.Name).Contains(packageName, StringComparison.Ordinal));
+        if (named != null || !IsPackagesOwnRepo(repo, package)) return named;
+        return zips.FirstOrDefault(a => repoName.Length > 0 && PackageIndex.Simplify(a.Name).Contains(repoName, StringComparison.Ordinal))
                ?? (zips.Count == 1 ? zips[0] : null);
     }
+
+    /// <summary>
+    /// The plugin DLLs of a release without a package zip: all of them from the package's own repo, else only those named
+    /// like the package. The store also checks each one replaces a file of the Thunderstore version.
+    /// </summary>
+    private static List<GitHubAsset> PickPlugins(List<GitHubAsset> assets, TsPackage package, GitHubRepo repo)
+    {
+        List<GitHubAsset> dlls = assets.Where(a => a.Name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)).ToList();
+        if (IsPackagesOwnRepo(repo, package)) return dlls;
+        string name = WithoutGame(PackageIndex.Simplify(package.Name));
+        return name.Length < 4 ? new List<GitHubAsset>() : dlls.Where(a => PackageIndex.Simplify(Path.GetFileNameWithoutExtension(a.Name)).Contains(name, StringComparison.Ordinal)).ToList();
+    }
+
+    /// <summary>The repo is named like the package ("VoidCrewFleet" for Void_Crew_Fleet), not a framework's or a repo of many mods.</summary>
+    internal static bool IsPackagesOwnRepo(GitHubRepo repo, TsPackage package)
+    {
+        string repoName = WithoutGame(PackageIndex.Simplify(repo.Name));
+        string packageName = WithoutGame(PackageIndex.Simplify(package.Name));
+        if (repoName.Length < 3 || packageName.Length < 3) return false;
+        if (repoName == packageName) return true;
+        (string shorter, string longer) = repoName.Length <= packageName.Length ? (repoName, packageName) : (packageName, repoName);
+        return shorter.Length >= 6 && shorter != "voidcrew" && longer.Contains(shorter, StringComparison.Ordinal);
+    }
+
+    private static string WithoutGame(string simple) => simple.StartsWith("voidcrew", StringComparison.Ordinal) && simple.Length > 10 ? simple[8..] : simple;
 
     /// <summary>Downloads a release file into cache\downloads and checks its size and its SHA-256 (when GitHub lists one).</summary>
     public async Task<string> DownloadAsync(GitHubAsset asset, IProgress<double>? progress, CancellationToken cancel = default)
@@ -271,22 +353,31 @@ public sealed class GitHubClient : IDisposable
         Directory.CreateDirectory(_paths.Downloads);
         string target = Path.Combine(_paths.Downloads, $"github-{Guid.NewGuid():N}-{PackageStore.SafeName(asset.Name)}");
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        long done = 0;
-        using (HttpResponseMessage response = await _http.GetAsync(asset.Url, HttpCompletionOption.ResponseHeadersRead, cancel))
+        long done;
+        try
         {
+            using HttpResponseMessage response = await _http.GetAsync(asset.Url, HttpCompletionOption.ResponseHeadersRead, cancel);
             response.EnsureSuccessStatusCode();
             long total = response.Content.Headers.ContentLength ?? asset.Size;
             await using Stream source = await response.Content.ReadAsStreamAsync(cancel);
             await using FileStream file = File.Create(target);
-            var buffer = new byte[81920];
-            int read;
-            while ((read = await source.ReadAsync(buffer, cancel)) > 0)
+            done = await ThunderstoreClient.CopyAsync(source, file, StallTimeout, (buffer, read, sofar) =>
             {
-                await file.WriteAsync(buffer.AsMemory(0, read), cancel);
                 hash.AppendData(buffer, 0, read);
-                done += read;
-                if (total > 0) progress?.Report(Math.Min(1.0, done / (double)total));
+                if (total > 0) progress?.Report(Math.Min(1.0, sofar / (double)total));
+            }, cancel);
+        }
+        catch
+        {
+            try
+            {
+                File.Delete(target);
             }
+            catch (IOException)
+            {
+                // Left in cache\downloads; harmless.
+            }
+            throw;
         }
         string actual = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
         if ((asset.Size > 0 && done != asset.Size) || (asset.Sha256 != null && actual != asset.Sha256))
@@ -298,7 +389,23 @@ public sealed class GitHubClient : IDisposable
         return target;
     }
 
-    private static JsonDocument? Parse(CachedAnswer answer) => answer.Missing ? null : JsonDocument.Parse(answer.Body);
+    /// <summary>A kept answer as JSON; one that can't be read (a damaged github.json) is dropped instead.</summary>
+    private JsonDocument? Parse(string path, CachedAnswer answer)
+    {
+        if (answer.Missing) return null;
+        try
+        {
+            return JsonDocument.Parse(answer.Body);
+        }
+        catch (JsonException)
+        {
+            lock (_cacheLock)
+            {
+                if (_cache != null && _cache.TryGetValue(path, out CachedAnswer? kept) && ReferenceEquals(kept, answer)) _cache.Remove(path);
+            }
+            return null;
+        }
+    }
 
     private Dictionary<string, CachedAnswer> LoadCache()
     {
@@ -321,18 +428,38 @@ public sealed class GitHubClient : IDisposable
         return new Dictionary<string, CachedAnswer>(StringComparer.OrdinalIgnoreCase);
     }
 
-    private void SaveCache()
+    /// <summary>Saves github.json in a moment, once for every change made until then.</summary>
+    private void SaveSoon()
     {
-        try
+        lock (_cacheLock)
         {
-            Directory.CreateDirectory(_paths.Cache);
-            string temp = CacheFile + ".saving";
-            File.WriteAllText(temp, JsonSerializer.Serialize(_cache));
-            File.Move(temp, CacheFile, true);
+            if (_saveQueued || _disposed) return;
+            _saveQueued = true;
         }
-        catch (Exception e)
+        _ = Task.Run(async () =>
         {
-            AppLog.Warn($"Could not save {CacheFile}: {e.Message}");
+            await Task.Delay(SaveDelay);
+            SaveNow();
+        });
+    }
+
+    private void SaveNow()
+    {
+        lock (_cacheLock)
+        {
+            if (!_saveQueued || _cache == null) return;
+            _saveQueued = false;
+            try
+            {
+                Directory.CreateDirectory(_paths.Cache);
+                string temp = CacheFile + ".saving";
+                File.WriteAllText(temp, JsonSerializer.Serialize(_cache));
+                File.Move(temp, CacheFile, true);
+            }
+            catch (Exception e)
+            {
+                AppLog.Warn($"Could not save {CacheFile}: {e.Message}");
+            }
         }
     }
 
@@ -353,10 +480,16 @@ public sealed class GitHubClient : IDisposable
     }
 
     private static string? Text(JsonElement element, string name) =>
-        element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
     private static bool Bool(JsonElement element, string name) =>
-        element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.True;
+        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.True;
 
-    public void Dispose() => _http.Dispose();
+    public void Dispose()
+    {
+        // What's waiting to be saved is saved now (and nothing is queued after this).
+        lock (_cacheLock) _disposed = true;
+        SaveNow();
+        _http.Dispose();
+    }
 }

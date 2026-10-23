@@ -1,4 +1,6 @@
+using System.ComponentModel;
 using System.Windows;
+using VoidCrewModLauncher.ViewModels;
 
 namespace VoidCrewModLauncher;
 
@@ -8,6 +10,14 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         StateChanged += (_, _) => OnWindowStateChanged();
+        Closing += OnClosing;
+    }
+
+    /// <summary>Closing in the middle of a download or install leaves it half done: ask first.</summary>
+    private void OnClosing(object? sender, CancelEventArgs e)
+    {
+        if (DataContext is not MainViewModel { IsBusy: true, ClosingForUpdate: false } model) return;
+        if (!model.Dialogs.Confirm("Close the launcher", "The launcher is still busy. Close it anyway?", "CLOSE")) e.Cancel = true;
     }
 
     private void OnWindowStateChanged()

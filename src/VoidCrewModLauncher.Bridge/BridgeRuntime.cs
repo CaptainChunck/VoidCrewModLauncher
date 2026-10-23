@@ -39,7 +39,7 @@ namespace VoidCrewModLauncher.Bridge
 
             if (Launch == null || string.IsNullOrEmpty(Launch.Token)) return;
             int[] ports = Launch.Ports != null && Launch.Ports.Count > 0 ? Launch.Ports.ToArray() : BridgeDefaults.Ports;
-            _connection = new Connection(ports, Json.Write(Hello()));
+            _connection = new Connection(ports, Launch.Token, Hello());
             _connection.Start();
         }
 
@@ -60,9 +60,10 @@ namespace VoidCrewModLauncher.Bridge
                 SimulateDebugRooms();
                 if (_connection == null) return;
 
+                // A few lines a frame at most, so a burst from the launcher can't stall a frame.
                 string line;
-                while (_connection.TryReceive(out line)) Handle(line);
-                if (!_connection.Connected || !_connection.Welcomed) return;
+                for (int i = 0; i < 16 && _connection.TryReceive(out line); i++) Handle(line);
+                if (!_connection.Connected) return;
 
                 bool fresh = _sentGeneration != _connection.Generation;
                 _sentGeneration = _connection.Generation;
@@ -92,7 +93,7 @@ namespace VoidCrewModLauncher.Bridge
 
         private void Send(Message message)
         {
-            if (_connection != null && _connection.Welcomed) _connection.Send(Json.Write(message));
+            if (_connection != null) _connection.Send(Json.Write(message));
         }
 
         private void SendStateIfChanged(bool force)
@@ -148,21 +149,9 @@ namespace VoidCrewModLauncher.Bridge
                 return;
             }
 
-            string type = (string)message["type"];
-            if (type == MessageTypes.Welcome)
-            {
-                if ((string)message["token"] == Launch.Token)
-                {
-                    _connection.Welcomed = true;
-                    Log.Info("The launcher (" + (string)message["launcherVersion"] + ") is connected.");
-                }
-                else
-                {
-                    Log.Warn("A program that isn't the launcher of this game answered on the launcher's port; ignoring it.");
-                }
-                return;
-            }
-            if (!_connection.Welcomed) return;
+            // The connection only passes lines on once the launcher has proved it knows the token.
+            string type = message["type"] != null && message["type"].Type == JTokenType.String ? (string)message["type"] : null;
+            if (type == null || type == MessageTypes.Welcome) return;
 
             switch (type)
             {
@@ -287,7 +276,6 @@ namespace VoidCrewModLauncher.Bridge
         {
             var hello = new HelloMessage
             {
-                Token = Launch.Token,
                 BridgeVersion = Plugin.Version,
                 GameVersion = Application.version,
                 LaunchId = Launch.LaunchId,

@@ -21,7 +21,9 @@ namespace VoidCrewModLauncher.Bridge
 
         public static string Write(object value)
         {
-            return JsonConvert.SerializeObject(value, Settings);
+            var text = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
+            Serializer.Serialize(text, value);
+            return text.ToString();
         }
 
         public static T Read<T>(JObject value)

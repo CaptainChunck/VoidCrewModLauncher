@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.7.0
+
+A full review of the launcher for safety, crashes and performance.
+
+**Your PC and files**
+- Uninstalling with "delete mods and settings" deletes only the launcher's own files and folders, never anything
+  else in its data folder.
+- Uninstalling now really removes the install folder (it was left behind).
+- Read-only files (a local mod copied from a git clone) no longer stop mods updating, the launcher rebuilding its
+  BepInEx, FREE UP SPACE or uninstalling. Deleting never follows a folder link out of the launcher's folders.
+- If another program (antivirus, OneDrive) has settings.json or library.json open, the launcher waits for it or
+  stops with a message, instead of starting from empty files and saving those over yours. Saves are flushed to disk.
+- Mod zips can't unpack more than 2 GB or 20,000 files, and download file names from mod lists can't point outside
+  the launcher's folder.
+- The loader in the game folder is added in an order that always leaves it marked as the launcher's, and removing it
+  leaves alone a .doorstop_version the launcher didn't add.
+- A voidcrewmod:// link only ever passes the link: the launcher ignores anything else on its command line then. The
+  self-update only replaces the launcher's own exe.
+
+**The game connection**
+- The launcher and the game prove to each other that they know this install's secret without sending it, so another
+  program on the PC can't take the launcher's place, and the game moves on from a port where something else answers.
+- A join from the launcher is refused while you're on a mission; leave it in the game first.
+- Update notices go into the chat one line at a time, and the same one never twice.
+- Less work in the game while it lists lobbies; lobby details that change (roles, quests, mods) now show.
+
+**Mods**
+- A mod's GitHub release only counts when its files are named like the mod, and a GitHub version that fails its
+  checks falls back to Thunderstore's instead of blocking the install.
+- A download that stops sending data fails after 30 seconds instead of waiting forever.
+- Thunderstore, GitHub and the website are asked with 20-second limits, and GitHub checks run side by side, so the
+  launcher starts quickly when a site doesn't answer.
+- With no internet, the game still starts with the BepInEx you already have.
+- Lobbies listing many mods can't flood GitHub or Thunderstore with lookups.
+
+**The launcher**
+- Clicking a voidcrewmod:// link while the launcher is open no longer leaves a stuck launcher behind.
+- Links are handled one at a time and wait for the launcher to finish what it's doing; turning on a switched-off
+  mod from a link asks first.
+- CHECK FOR UPDATES and closing the window wait for, or ask about, work in progress.
+- Turning a mod off goes through the same checks as turning it on.
+- READMEs that are huge or built to be slow can't freeze the launcher; an unclosed code block no longer hides the rest.
+- Briefly turning off a mod no longer lowers your saved max players for good.
+- Fewer redraws while the server browser looks up lobby mods, and the game is no longer searched for every second.
+
 ## 0.6.2
 
 - Mods from voidcrewmod.com show their README from the site in MODS (it was only read from Thunderstore).

@@ -119,7 +119,14 @@ public partial class ModsViewModel : ObservableObject
         ModManager mods = _main.Service.Mods;
         if (!enabled)
         {
+            string what = $"Turning off {row.Name}";
+            if (!_main.CheckIdle(what))
+            {
+                row.ResetEnabled(true);
+                return;
+            }
             List<InstalledMod> dependents = _main.Service.EnabledDependents(row.Id);
+            bool alsoDependents = false;
             if (dependents.Count > 0)
             {
                 int choice = _main.Dialogs.Ask("Other mods need it",
@@ -131,13 +138,18 @@ public partial class ModsViewModel : ObservableObject
                     row.ResetEnabled(true);
                     return;
                 }
-                if (choice == 0)
+                alsoDependents = choice == 0;
+            }
+            bool off = await _main.RunAsync(what, async () =>
+            {
+                if (alsoDependents)
                 {
                     foreach (InstalledMod dependent in dependents) await mods.SetEnabledAsync(dependent.Id, false);
                 }
-            }
-            await mods.SetEnabledAsync(row.Id, false);
-            _main.SetStatus($"{row.Name} is off. It isn't loaded when you play or host.");
+                await mods.SetEnabledAsync(row.Id, false);
+            });
+            if (!off) row.ResetEnabled(true);
+            else _main.SetStatus($"{row.Name} is off. It isn't loaded when you play or host.");
             return;
         }
         bool ok = await _main.RunAsync($"Turning on {row.Name}", () => _main.Service.SetModEnabledAsync(row.Id, true, new SyncProgress<InstallStatus>(s => _main.OnUi(() => _main.SetStatus(s.Message, s.Fraction)))));
@@ -164,6 +176,8 @@ public partial class ModsViewModel : ObservableObject
         List<InstalledMod> dependents = _main.Service.EnabledDependents(row.Id);
         string warning = dependents.Count > 0 ? $"\n\n{string.Join(", ", dependents.Select(d => d.DisplayName))} need it, so the launcher will download it again for them." : "";
         if (!_main.Dialogs.Confirm("Remove mod", $"Remove {row.Name} {row.Version} from the launcher?{warning}\n\nIts settings file (BepInEx\\config) is kept.", "REMOVE")) return;
+        // Something may have started while the question was up.
+        if (!_main.CheckIdle($"Removing {row.Name}")) return;
         _main.Service.Mods.Uninstall(row.Id);
         _main.SetStatus($"Removed {row.Name}.");
     }

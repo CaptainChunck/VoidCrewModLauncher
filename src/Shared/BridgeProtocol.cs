@@ -3,15 +3,18 @@
 #if NET5_0_OR_GREATER
 #nullable disable
 #endif
+using System;
 using System.Collections.Generic;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace VoidCrewModLauncher.Protocol
 {
     /// <summary>
     /// The launcher and its helper mod in the game (the bridge) talk over one loopback TCP connection: one JSON object
     /// per line, camelCase names, and a "type" field that says which message it is. The launcher listens; the bridge
-    /// connects and says hello with the token from launch.json, and the launcher answers with a welcome carrying the same
-    /// token. Neither side acts on the other's commands before that.
+    /// connects and says hello, and the launcher answers with a welcome. Each side proves it knows the token from
+    /// launch.json without sending it (see <see cref="BridgeAuth"/>). Neither side acts on the other's commands before that.
     /// </summary>
     public static class MessageTypes
     {
@@ -48,6 +51,49 @@ namespace VoidCrewModLauncher.Protocol
         public const string LaunchFileName = "launch.json";
     }
 
+    /// <summary>
+    /// The handshake's proofs: an HMAC of the token over a fresh random nonce and the launcher's port. The token itself is
+    /// never sent, so a program that answers on a launcher port learns nothing, and since the port is in the proof, a
+    /// program in between can't pass a proof on from the real launcher on another port.
+    /// </summary>
+    public static class BridgeAuth
+    {
+        public const string HelloPurpose = "hello";
+        public const string WelcomePurpose = "welcome";
+
+        public static string NewNonce()
+        {
+            var bytes = new byte[16];
+            using (RandomNumberGenerator random = RandomNumberGenerator.Create()) random.GetBytes(bytes);
+            return Hex(bytes);
+        }
+
+        public static string Proof(string token, string purpose, string nonce, int port)
+        {
+            using (var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(token ?? "")))
+            {
+                return Hex(hmac.ComputeHash(Encoding.UTF8.GetBytes(purpose + "|" + nonce + "|" + port)));
+            }
+        }
+
+        public static bool Check(string token, string purpose, string nonce, int port, string proof)
+        {
+            if (string.IsNullOrEmpty(token) || string.IsNullOrEmpty(nonce) || nonce.Length > 64 || string.IsNullOrEmpty(proof)) return false;
+            string expected = Proof(token, purpose, nonce, port);
+            if (proof.Length != expected.Length) return false;
+            int difference = 0;
+            for (int i = 0; i < expected.Length; i++) difference |= expected[i] ^ proof[i];
+            return difference == 0;
+        }
+
+        private static string Hex(byte[] bytes)
+        {
+            var text = new StringBuilder(bytes.Length * 2);
+            foreach (byte b in bytes) text.Append(b.ToString("x2"));
+            return text.ToString();
+        }
+    }
+
     public class Message
     {
         public string Type { get; set; }
@@ -58,7 +104,8 @@ namespace VoidCrewModLauncher.Protocol
     public class HelloMessage : Message
     {
         public HelloMessage() { Type = MessageTypes.Hello; }
-        public string Token { get; set; }
+        public string Nonce { get; set; }
+        public string Proof { get; set; }
         public string BridgeVersion { get; set; }
         public string GameVersion { get; set; }
         public string LaunchId { get; set; }
@@ -202,7 +249,7 @@ namespace VoidCrewModLauncher.Protocol
     public class WelcomeMessage : Message
     {
         public WelcomeMessage() { Type = MessageTypes.Welcome; }
-        public string Token { get; set; }
+        public string Proof { get; set; }
         public string LauncherVersion { get; set; }
     }
 

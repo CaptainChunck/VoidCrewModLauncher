@@ -57,6 +57,8 @@ namespace VoidCrewModLauncher.Bridge
             if (PhotonNetwork.InRoom && PhotonNetwork.CurrentRoom.Name == command.RoomId) return "You're already in this lobby.";
             if (!(state is GSMainMenu) && !(state is GSIngame)) return "Void Crew is busy right now (" + GameInfo.Phase() + "). Try again from the main menu or the hub.";
             if (state is GSMainMenu && !GameInfo.InLobby) return "Void Crew isn't connected to its lobby server yet.";
+            // Leaving a mission ends it for the crew when you host; that's the player's call in the game, not the launcher's.
+            if (GameInfo.Phase() == "mission") return "You're on a mission. Leave it in the game first, then join from the hub or the main menu.";
             if (command.Modded && !GameInfo.CanJoinModded())
             {
                 GameInfo.AllowModdedJoins();

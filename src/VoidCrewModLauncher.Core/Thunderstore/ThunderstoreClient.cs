@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using VoidCrewModLauncher.Core.Mods;
 
 namespace VoidCrewModLauncher.Core.Thunderstore;
 
@@ -26,6 +27,12 @@ public sealed class ThunderstoreClient : IDisposable
     /// <summary>How long "Thunderstore doesn't have this version" is believed before asking again.</summary>
     private static readonly TimeSpan MissingAge = TimeSpan.FromMinutes(10);
 
+    /// <summary>How long one call of the per-package API may take (downloads have the client's longer timeout).</summary>
+    internal static readonly TimeSpan ApiTimeout = TimeSpan.FromSeconds(20);
+
+    /// <summary>How many per-package answers are kept; lobbies (other players) name packages, so this mustn't grow forever.</summary>
+    private const int MaxRemembered = 1000;
+
     private static readonly JsonSerializerOptions Json = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
@@ -47,6 +54,9 @@ public sealed class ThunderstoreClient : IDisposable
         _http.Timeout = TimeSpan.FromMinutes(5);
         _http.DefaultRequestHeaders.UserAgent.ParseAdd(AppInfo.UserAgent);
     }
+
+    /// <summary>A download fails when nothing arrives for this long (the client's timeout doesn't cover reading the body).</summary>
+    internal TimeSpan StallTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>When the list came from the disk cache because Thunderstore couldn't be reached.</summary>
     public bool IsOffline { get; private set; }
@@ -156,13 +166,15 @@ public sealed class ThunderstoreClient : IDisposable
         await _lookups.WaitAsync(cancel);
         try
         {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+            timeout.CancelAfter(ApiTimeout);
             string url = $"{Site}/api/experimental/package/{Uri.EscapeDataString(reference.Namespace)}/{Uri.EscapeDataString(reference.Name)}/";
-            using HttpResponseMessage response = await _http.GetAsync(url, cancel);
+            using HttpResponseMessage response = await _http.GetAsync(url, timeout.Token);
             if (response.StatusCode != HttpStatusCode.NotFound)
             {
                 response.EnsureSuccessStatusCode();
-                await using Stream body = await response.Content.ReadAsStreamAsync(cancel);
-                package = (await JsonSerializer.DeserializeAsync<CurrentPackage>(body, Json, cancel))?.ToPackage();
+                await using Stream body = await response.Content.ReadAsStreamAsync(timeout.Token);
+                package = (await JsonSerializer.DeserializeAsync<CurrentPackage>(body, Json, timeout.Token))?.ToPackage();
             }
         }
         catch (Exception e) when (e is not OperationCanceledException || !cancel.IsCancellationRequested)
@@ -174,8 +186,19 @@ public sealed class ThunderstoreClient : IDisposable
         {
             _lookups.Release();
         }
-        _current[id] = (DateTime.UtcNow, package);
+        Remember<(DateTime At, TsPackage? Package)>(_current, id, (DateTime.UtcNow, package), a => DateTime.UtcNow - a.At < CurrentAge);
         return package;
+    }
+
+    /// <summary>Keeps an answer, first dropping stale ones (or, when that isn't enough, all of them) once there are too many.</summary>
+    private static void Remember<T>(ConcurrentDictionary<string, T> answers, string key, T answer, Func<T, bool> stillGood)
+    {
+        if (answers.Count >= MaxRemembered)
+        {
+            foreach (KeyValuePair<string, T> old in answers.Where(p => !stillGood(p.Value)).ToList()) answers.TryRemove(old.Key, out _);
+            if (answers.Count >= MaxRemembered) answers.Clear();
+        }
+        answers[key] = answer;
     }
 
     /// <summary>One exact version ("Namespace-Name", "1.2.3") from Thunderstore's per-version API, or null when it doesn't have it.</summary>
@@ -188,13 +211,15 @@ public sealed class ThunderstoreClient : IDisposable
         await _lookups.WaitAsync(cancel);
         try
         {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+            timeout.CancelAfter(ApiTimeout);
             string url = $"{Site}/api/experimental/package/{Uri.EscapeDataString(reference.Namespace)}/{Uri.EscapeDataString(reference.Name)}/{Uri.EscapeDataString(version)}/";
-            using HttpResponseMessage response = await _http.GetAsync(url, cancel);
+            using HttpResponseMessage response = await _http.GetAsync(url, timeout.Token);
             if (response.StatusCode != HttpStatusCode.NotFound)
             {
                 response.EnsureSuccessStatusCode();
-                await using Stream body = await response.Content.ReadAsStreamAsync(cancel);
-                found = await JsonSerializer.DeserializeAsync<TsVersion>(body, Json, cancel);
+                await using Stream body = await response.Content.ReadAsStreamAsync(timeout.Token);
+                found = await JsonSerializer.DeserializeAsync<TsVersion>(body, Json, timeout.Token);
             }
         }
         catch (Exception e) when (e is not OperationCanceledException || !cancel.IsCancellationRequested)
@@ -206,7 +231,7 @@ public sealed class ThunderstoreClient : IDisposable
         {
             _lookups.Release();
         }
-        _versions[key] = (DateTime.UtcNow, found);
+        Remember<(DateTime At, TsVersion? Version)>(_versions, key, (DateTime.UtcNow, found), a => a.Version != null || DateTime.UtcNow - a.At < MissingAge);
         return found;
     }
 
@@ -275,27 +300,73 @@ public sealed class ThunderstoreClient : IDisposable
     public async Task<string> DownloadAsync(TsVersion version, IProgress<double>? progress, CancellationToken cancel = default)
     {
         Directory.CreateDirectory(_paths.Downloads);
-        string target = Path.Combine(_paths.Downloads, $"{version.FullName}.zip");
+        // The name comes from the package list (Thunderstore's or voidcrewmod.com's): made safe, and unique per download.
+        string target = Path.Combine(_paths.Downloads, $"{Guid.NewGuid():N}-{PackageStore.SafeName(version.FullName)}.zip");
         string temp = target + ".part";
-        using (HttpResponseMessage response = await _http.GetAsync(version.DownloadUrl, HttpCompletionOption.ResponseHeadersRead, cancel))
+        try
         {
-            response.EnsureSuccessStatusCode();
-            long? length = response.Content.Headers.ContentLength ?? (version.FileSize > 0 ? version.FileSize : null);
-            await using Stream source = await response.Content.ReadAsStreamAsync(cancel);
-            await using FileStream file = File.Create(temp);
-            var buffer = new byte[81920];
-            long done = 0;
-            int read;
-            while ((read = await source.ReadAsync(buffer, cancel)) > 0)
+            using (HttpResponseMessage response = await _http.GetAsync(version.DownloadUrl, HttpCompletionOption.ResponseHeadersRead, cancel))
             {
-                await file.WriteAsync(buffer.AsMemory(0, read), cancel);
-                done += read;
-                if (length > 0) progress?.Report(Math.Min(1.0, done / (double)length));
+                response.EnsureSuccessStatusCode();
+                long? length = response.Content.Headers.ContentLength ?? (version.FileSize > 0 ? version.FileSize : null);
+                await using Stream source = await response.Content.ReadAsStreamAsync(cancel);
+                await using FileStream file = File.Create(temp);
+                await CopyAsync(source, file, StallTimeout, (_, _, done) =>
+                {
+                    if (length > 0) progress?.Report(Math.Min(1.0, done / (double)length));
+                }, cancel);
             }
+            File.Move(temp, target, true);
         }
-        File.Move(temp, target, true);
+        catch
+        {
+            TryDelete(temp);
+            throw;
+        }
         progress?.Report(1.0);
         return target;
+    }
+
+    /// <summary>
+    /// Copies a download to <paramref name="target"/>, telling <paramref name="received"/> about each piece (the bytes,
+    /// their count, the total so far). Throws an IOException when nothing arrives for <paramref name="stall"/>: a
+    /// stalled server would otherwise keep the download (and the store's lock) waiting forever.
+    /// </summary>
+    internal static async Task<long> CopyAsync(Stream source, Stream target, TimeSpan stall, Action<byte[], int, long>? received, CancellationToken cancel)
+    {
+        using var watchdog = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+        var buffer = new byte[81920];
+        long done = 0;
+        while (true)
+        {
+            watchdog.CancelAfter(stall);
+            int read;
+            try
+            {
+                // WaitAsync too, for a stream that doesn't listen to its token.
+                read = await source.ReadAsync(buffer, watchdog.Token).AsTask().WaitAsync(watchdog.Token);
+            }
+            catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
+            {
+                throw new IOException($"The download stalled: nothing arrived for {stall.TotalSeconds:0} seconds.");
+            }
+            if (read == 0) return done;
+            await target.WriteAsync(buffer.AsMemory(0, read), cancel);
+            done += read;
+            received?.Invoke(buffer, read, done);
+        }
+    }
+
+    private static void TryDelete(string file)
+    {
+        try
+        {
+            File.Delete(file);
+        }
+        catch
+        {
+            // Left in cache\downloads; harmless.
+        }
     }
 
     /// <summary>
@@ -311,8 +382,10 @@ public sealed class ThunderstoreClient : IDisposable
             try
             {
                 string url = $"{site}/api/experimental/package/{Uri.EscapeDataString(owner)}/{Uri.EscapeDataString(name)}/{Uri.EscapeDataString(version)}/readme/";
-                using JsonDocument document = JsonDocument.Parse(await _http.GetStringAsync(url));
-                return document.RootElement.TryGetProperty("markdown", out JsonElement markdown) ? markdown.GetString() : null;
+                using var timeout = new CancellationTokenSource(ApiTimeout);
+                using JsonDocument document = JsonDocument.Parse(await _http.GetStringAsync(url, timeout.Token));
+                return document.RootElement.ValueKind == JsonValueKind.Object && document.RootElement.TryGetProperty("markdown", out JsonElement markdown)
+                       && markdown.ValueKind == JsonValueKind.String ? markdown.GetString() : null;
             }
             catch (Exception e)
             {

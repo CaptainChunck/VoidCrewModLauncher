@@ -76,7 +76,8 @@ public partial class HostViewModel : ObservableObject
         lobbyName = settings.Name;
         isPublic = settings.IsPublic;
         crossPlay = settings.CrossPlay;
-        maxPlayers = Math.Max(1, settings.MaxPlayers);
+        _wantedMaxPlayers = Math.Max(1, settings.MaxPlayers);
+        maxPlayers = _wantedMaxPlayers;
         RefreshMods();
     }
 
@@ -87,6 +88,12 @@ public partial class HostViewModel : ObservableObject
     [ObservableProperty] private bool crossPlay;
     [ObservableProperty] private int maxPlayers;
     [ObservableProperty] private int playerLimit = 6;
+
+    /// <summary>The player count you chose (saved); the lobby gets at most what its mods allow.</summary>
+    private int _wantedMaxPlayers;
+
+    /// <summary>Set while the limit changes, so the shown count following it isn't saved as your choice.</summary>
+    private bool _limiting;
 
     public bool IsPrivate
     {
@@ -102,8 +109,19 @@ public partial class HostViewModel : ObservableObject
         {
             Mods.Add(new HostModViewModel(this, mod, chosen.TryGetValue(mod.Id, out ModNeed need) ? need : null));
         }
-        PlayerLimit = Mods.Any(m => BiggerRooms.Contains(m.Mod.Id, StringComparer.OrdinalIgnoreCase)) ? 16 : 6;
-        if (MaxPlayers > PlayerLimit) MaxPlayers = PlayerLimit;
+        int limit = Mods.Any(m => BiggerRooms.Contains(m.Mod.Id, StringComparer.OrdinalIgnoreCase)) ? 16 : 6;
+        _limiting = true;
+        try
+        {
+            // The slider's maximum and value change in the order that keeps the value inside it.
+            if (limit > PlayerLimit) PlayerLimit = limit;
+            MaxPlayers = Math.Min(_wantedMaxPlayers, limit);
+            PlayerLimit = limit;
+        }
+        finally
+        {
+            _limiting = false;
+        }
     }
 
     public void SetNeed(string id, ModNeed? need)
@@ -121,7 +139,12 @@ public partial class HostViewModel : ObservableObject
         Save();
     }
     partial void OnCrossPlayChanged(bool value) => Save();
-    partial void OnMaxPlayersChanged(int value) => Save();
+    partial void OnMaxPlayersChanged(int value)
+    {
+        if (_limiting) return;
+        _wantedMaxPlayers = value;
+        Save();
+    }
 
     private void Save()
     {
@@ -129,7 +152,7 @@ public partial class HostViewModel : ObservableObject
         settings.Name = LobbyName.Trim();
         settings.IsPublic = IsPublic;
         settings.CrossPlay = CrossPlay;
-        settings.MaxPlayers = MaxPlayers;
+        settings.MaxPlayers = _wantedMaxPlayers;
         _main.Service.SaveSettings();
     }
 
@@ -155,7 +178,11 @@ public partial class HostViewModel : ObservableObject
             if (GameProcess.IsRunning())
             {
                 string why = state?.Phase is "hub" or "mission" ? "You're in a game right now. " : "";
-                if (!_main.Dialogs.Confirm("Restart Void Crew", why + "Void Crew restarts with your enabled mods and opens your lobby. Continue?", "RESTART AND HOST")) return;
+                if (!_main.Dialogs.Confirm("Restart Void Crew", why + "Void Crew restarts with your enabled mods and opens your lobby. Continue?", "RESTART AND HOST"))
+                {
+                    _main.SetStatus("Cancelled.");
+                    return;
+                }
                 if (!await _main.CloseGameOrAskAsync()) throw new InvalidOperationException("Void Crew is still running.");
             }
             await service.LaunchAsync(LaunchMode.Host, command);

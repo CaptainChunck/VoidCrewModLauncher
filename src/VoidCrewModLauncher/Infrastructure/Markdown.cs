@@ -2,12 +2,14 @@ using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Documents;
 using System.Windows.Media;
+using VoidCrewModLauncher.Core;
 
 namespace VoidCrewModLauncher.Infrastructure;
 
 /// <summary>
 /// Enough Markdown for Thunderstore READMEs: headings, lists, quotes, code blocks, bold, italics, inline code and links.
-/// Images show their alt text, HTML tags are dropped, tables become plain lines.
+/// Images show their alt text, HTML tags are dropped, tables become plain lines. READMEs come from anyone, so the text
+/// is capped and every pattern has a time limit; a README that runs into it shows as plain text.
 /// </summary>
 public static partial class Markdown
 {
@@ -17,23 +19,48 @@ public static partial class Markdown
     private static readonly Brush Link = new SolidColorBrush(Color.FromRgb(0xBD, 0xE7, 0xFB));
     private static readonly Brush CodeBack = new SolidColorBrush(Color.FromArgb(0x60, 0, 0, 0));
 
+    /// <summary>The most of a README that is shown, and of each of its lines.</summary>
+    private const int MaxLength = 256 * 1024;
+    private const int MaxLineLength = 4096;
+
+    /// <summary>The time limit of each pattern match.</summary>
+    private const int MatchTimeoutMs = 250;
+
     public static FlowDocument ToDocument(string? markdown)
     {
-        var document = new FlowDocument
-        {
-            FontFamily = new FontFamily("Segoe UI"),
-            FontSize = 14,
-            Foreground = Text,
-            PagePadding = new Thickness(0),
-            TextAlignment = TextAlignment.Left,
-        };
         if (string.IsNullOrWhiteSpace(markdown))
         {
-            document.Blocks.Add(new Paragraph(new Run("This mod has no README.")) { Foreground = Brushes.Gray });
-            return document;
+            FlowDocument empty = NewDocument();
+            empty.Blocks.Add(new Paragraph(new Run("This mod has no README.")) { Foreground = Brushes.Gray });
+            return empty;
         }
+        if (markdown.Length > MaxLength) markdown = markdown[..MaxLength];
+        try
+        {
+            return Render(markdown);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            AppLog.Warn("A README took too long to read; it shows as plain text.");
+            FlowDocument plain = NewDocument();
+            plain.Blocks.Add(new Paragraph(new Run(markdown.Replace("\r\n", "\n"))));
+            return plain;
+        }
+    }
 
-        string[] lines = HtmlComment().Replace(markdown.Replace("\r\n", "\n"), "").Split('\n');
+    private static FlowDocument NewDocument() => new()
+    {
+        FontFamily = new FontFamily("Segoe UI"),
+        FontSize = 14,
+        Foreground = Text,
+        PagePadding = new Thickness(0),
+        TextAlignment = TextAlignment.Left,
+    };
+
+    private static FlowDocument Render(string markdown)
+    {
+        FlowDocument document = NewDocument();
+        string[] lines = StripComments(markdown.Replace("\r\n", "\n")).Split('\n');
         List? list = null;
         Paragraph? lastItem = null;
         var paragraph = new List<string>();
@@ -65,6 +92,19 @@ public static partial class Markdown
             quote.Clear();
         }
 
+        void FlushCode()
+        {
+            document.Blocks.Add(new Paragraph(new Run(string.Join("\n", code)))
+            {
+                FontFamily = new FontFamily("Consolas"),
+                FontSize = 12.5,
+                Background = CodeBack,
+                Padding = new Thickness(8),
+                Margin = new Thickness(0, 0, 0, 10),
+            });
+            code.Clear();
+        }
+
         void EndBlocks()
         {
             FlushParagraph();
@@ -75,20 +115,12 @@ public static partial class Markdown
 
         foreach (string raw in lines)
         {
-            string line = raw.TrimEnd();
+            string line = (raw.Length > MaxLineLength ? raw[..MaxLineLength] : raw).TrimEnd();
             if (line.TrimStart().StartsWith("```", StringComparison.Ordinal))
             {
                 if (inCode)
                 {
-                    document.Blocks.Add(new Paragraph(new Run(string.Join("\n", code)))
-                    {
-                        FontFamily = new FontFamily("Consolas"),
-                        FontSize = 12.5,
-                        Background = CodeBack,
-                        Padding = new Thickness(8),
-                        Margin = new Thickness(0, 0, 0, 10),
-                    });
-                    code.Clear();
+                    FlushCode();
                 }
                 else
                 {
@@ -110,11 +142,10 @@ public static partial class Markdown
                 continue;
             }
 
-            Match heading = HeadingLine().Match(trimmed);
-            if (heading.Success)
+            if (ReadHeading(trimmed) is { } heading)
             {
                 EndBlocks();
-                int level = heading.Groups[1].Length;
+                int level = heading.Level;
                 var block = new Paragraph
                 {
                     FontSize = level switch { 1 => 22, 2 => 19, _ => 16 },
@@ -122,7 +153,7 @@ public static partial class Markdown
                     Foreground = level <= 2 ? Heading : Accent,
                     Margin = new Thickness(0, level <= 2 ? 10 : 6, 0, 6),
                 };
-                AddInlines(block.Inlines, heading.Groups[2].Value);
+                AddInlines(block.Inlines, heading.Text);
                 document.Blocks.Add(block);
                 continue;
             }
@@ -171,9 +202,45 @@ public static partial class Markdown
             FlushQuote();
             paragraph.Add(trimmed);
         }
+        // A code block that is never closed runs to the end.
+        if (inCode && code.Count > 0) FlushCode();
         FlushParagraph();
         FlushQuote();
         return document;
+    }
+
+    /// <summary>"## Title ##" as (2, "Title"); null when the line isn't a heading. Read by hand: a pattern was slow on long lines.</summary>
+    private static (int Level, string Text)? ReadHeading(string line)
+    {
+        int level = 0;
+        while (level < line.Length && line[level] == '#') level++;
+        if (level is 0 or > 6 || level == line.Length || !char.IsWhiteSpace(line[level])) return null;
+        string text = line[level..].Trim();
+        // Closing #s, after a space.
+        int end = text.Length;
+        while (end > 0 && text[end - 1] == '#') end--;
+        if (end == 0) return (level, "");
+        if (end < text.Length && char.IsWhiteSpace(text[end - 1])) text = text[..end].TrimEnd();
+        return (level, text);
+    }
+
+    /// <summary>Drops &lt;!-- comments --&gt;; an unclosed one is left as it is. One pass, however the text is made.</summary>
+    private static string StripComments(string text)
+    {
+        int start = text.IndexOf("<!--", StringComparison.Ordinal);
+        if (start < 0) return text;
+        var kept = new System.Text.StringBuilder(text.Length);
+        int position = 0;
+        while (start >= 0)
+        {
+            int end = text.IndexOf("-->", start + 4, StringComparison.Ordinal);
+            if (end < 0) break;
+            kept.Append(text, position, start - position);
+            position = end + 3;
+            start = text.IndexOf("<!--", position, StringComparison.Ordinal);
+        }
+        kept.Append(text, position, text.Length - position);
+        return kept.ToString();
     }
 
     private static void AddInlines(InlineCollection inlines, string text)
@@ -217,21 +284,18 @@ public static partial class Markdown
 
     private static string StripHtml(string text) => HtmlTag().Replace(text, "");
 
-    [GeneratedRegex(@"^(#{1,6})\s+(.*?)\s*#*$")]
-    private static partial Regex HeadingLine();
-
-    [GeneratedRegex(@"^(\s*)[-*+]\s+(.*)$")]
+    [GeneratedRegex(@"^(\s*)[-*+]\s+(.*)$", RegexOptions.None, MatchTimeoutMs)]
     private static partial Regex BulletLine();
 
-    [GeneratedRegex(@"^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?$")]
+    [GeneratedRegex(@"^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?$", RegexOptions.None, MatchTimeoutMs)]
     private static partial Regex TableRule();
 
-    [GeneratedRegex(@"<!--.*?-->", RegexOptions.Singleline)]
-    private static partial Regex HtmlComment();
-
-    [GeneratedRegex(@"</?[a-zA-Z][^>]*>")]
+    // [^<>]: a run of "<a" without ">" is read once, not once per "<".
+    [GeneratedRegex(@"</?[a-zA-Z][^<>]*>", RegexOptions.None, MatchTimeoutMs)]
     private static partial Regex HtmlTag();
 
-    [GeneratedRegex(@"(?<img>!\[(?<imgalt>[^\]]*)\]\([^)]*\))|(?<link>\[(?<linktext>[^\]]+)\]\((?<url>[^)\s]+)[^)]*\))|(?<bold>\*\*(?<boldtext>[^*]+)\*\*|__(?<boldtext>[^_]+)__)|(?<code>`(?<codetext>[^`]+)`)|(?<italic>(?<![\w*])\*(?<italictext>[^*\s][^*]*)\*(?![\w*]))")]
+    // Link and image parts can't hold "[" or "]" (runs of "[" or "[a](" that never close are read once), and the atomic
+    // groups don't go back over what they took.
+    [GeneratedRegex(@"(?<img>!\[(?<imgalt>(?>[^\[\]]*))\]\((?>[^)\[\]]*)\))|(?<link>\[(?<linktext>(?>[^\[\]]+))\]\((?<url>(?>[^)\s\[\]]+))(?>[^)\[\]]*)\))|(?<bold>\*\*(?<boldtext>(?>[^*]+))\*\*|__(?<boldtext>(?>[^_]+))__)|(?<code>`(?<codetext>(?>[^`]+))`)|(?<italic>(?<![\w*])\*(?<italictext>[^*\s](?>[^*]*))\*(?![\w*]))", RegexOptions.None, MatchTimeoutMs)]
     private static partial Regex InlineToken();
 }

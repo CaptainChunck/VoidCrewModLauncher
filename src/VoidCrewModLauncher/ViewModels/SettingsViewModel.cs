@@ -112,6 +112,7 @@ public partial class SettingsViewModel : ObservableObject
     [RelayCommand]
     private async Task CheckForUpdates()
     {
+        if (!_main.CheckIdle("Checking for updates")) return;
         if (await _main.UpdateLauncherAsync(manual: true)) return;
         if (await _main.UpdateModsAsync() == null) _main.SetStatus(_main.StatusText + " Your mods are up to date.");
     }
@@ -144,7 +145,7 @@ public partial class SettingsViewModel : ObservableObject
         {
             return Directory.Exists(folder) ? new DirectoryInfo(folder).EnumerateFiles("*", SearchOption.AllDirectories).Sum(f => f.Length) : 0;
         }
-        catch (IOException)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             return 0;
         }
@@ -212,16 +213,15 @@ public partial class SettingsViewModel : ObservableObject
         if (!_main.Dialogs.Confirm("Remove BepInEx's loader",
                 "Remove winhttp.dll and doorstop_config.ini, which the launcher added to the game folder? The launcher adds them again (after asking) the next time you start a modded game.",
                 "REMOVE")) return;
-        foreach (string file in new[] { Doorstop.ProxyFile, Doorstop.ConfigFile, Doorstop.VersionFile })
+        // Something may have started while the question was open.
+        if (!_main.CheckIdle("Removing the loader") || GameProcess.IsRunning()) return;
+        IEnumerable<string> packs = Service.Store.Versions(Core.Thunderstore.PackageIndex.BepInExPackId)
+            .Select(v => Service.Store.VersionDirectory(Core.Thunderstore.PackageIndex.BepInExPackId, v)).ToList();
+        if (!Doorstop.Remove(game, packs))
         {
-            try
-            {
-                File.Delete(Path.Combine(game, file));
-            }
-            catch (IOException e)
-            {
-                AppLog.Warn($"Could not delete {file}: {e.Message}");
-            }
+            Refresh();
+            _main.SetStatus("Could not remove the loader from the game folder.");
+            return;
         }
         Service.Settings.DoorstopConsent = false;
         Service.SaveSettings();
@@ -254,16 +254,23 @@ public partial class SettingsViewModel : ObservableObject
                     long size = DirectorySize(versionFolder);
                     try
                     {
-                        Directory.Delete(versionFolder, true);
+                        FileTools.DeleteDirectory(versionFolder);
                         freed += size;
                         removed++;
                     }
-                    catch (IOException e)
+                    catch (Exception e) when (e is IOException or UnauthorizedAccessException)
                     {
                         AppLog.Warn($"Could not delete {versionFolder}: {e.Message}");
                     }
                 }
-                if (Directory.GetFileSystemEntries(modFolder).Length == 0) Directory.Delete(modFolder);
+                try
+                {
+                    if (Directory.GetFileSystemEntries(modFolder).Length == 0) Directory.Delete(modFolder);
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                {
+                    AppLog.Warn($"Could not delete {modFolder}: {e.Message}");
+                }
             }
         }
         Refresh();

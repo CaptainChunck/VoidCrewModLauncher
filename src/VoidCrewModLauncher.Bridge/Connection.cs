@@ -1,10 +1,13 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
+using Newtonsoft.Json.Linq;
+using VoidCrewModLauncher.Protocol;
 
 namespace VoidCrewModLauncher.Bridge
 {
@@ -12,37 +15,38 @@ namespace VoidCrewModLauncher.Bridge
     /// The connection to the launcher: a loopback TCP client on its own thread that keeps trying the launcher's ports
     /// while the game runs. Lines in and out go through queues; the game's main thread reads and writes them, so nothing
     /// here touches the game. If the launcher is closed, the bridge simply keeps trying every few seconds.
+    /// The launcher's welcome is checked here, before anything from it reaches the game: a program on a launcher port that
+    /// can't prove it knows the token is dropped, and the next try starts at the next port.
     /// </summary>
     internal sealed class Connection : IDisposable
     {
+        private const int WelcomeTimeout = 5000;
+        private const int WriteTimeout = 5000;
+        private const int MaxLine = 4 * 1024 * 1024;
+
         private readonly int[] _ports;
-        private readonly string _helloLine;
+        private readonly string _token;
+        private readonly HelloMessage _hello;
         private readonly ConcurrentQueue<string> _incoming = new ConcurrentQueue<string>();
         private readonly ConcurrentQueue<string> _outgoing = new ConcurrentQueue<string>();
         private readonly Thread _thread;
         private volatile bool _stop;
         private volatile bool _connected;
-        private volatile bool _welcomed;
         private int _generation;
+        private int _firstPort;
 
-        public Connection(int[] ports, string helloLine)
+        public Connection(int[] ports, string token, HelloMessage hello)
         {
             _ports = ports;
-            _helloLine = helloLine;
+            _token = token;
+            _hello = hello;
             _thread = new Thread(Run) { IsBackground = true, Name = "VoidCrewModLauncher bridge" };
         }
 
-        /// <summary>Connected over TCP (the launcher may not have welcomed us yet).</summary>
+        /// <summary>Connected, and the launcher proved it knows the token.</summary>
         public bool Connected
         {
             get { return _connected; }
-        }
-
-        /// <summary>The launcher answered the hello with the right token; set from the main thread.</summary>
-        public bool Welcomed
-        {
-            get { return _welcomed; }
-            set { _welcomed = value; }
         }
 
         /// <summary>Goes up by one on every new connection, so the main thread knows to send everything again.</summary>
@@ -76,7 +80,8 @@ namespace VoidCrewModLauncher.Bridge
             bool loggedWaiting = false;
             while (!_stop)
             {
-                TcpClient client = TryConnect();
+                int port;
+                TcpClient client = TryConnect(out port);
                 if (client == null)
                 {
                     if (!loggedWaiting)
@@ -91,7 +96,7 @@ namespace VoidCrewModLauncher.Bridge
                 loggedWaiting = false;
                 try
                 {
-                    Talk(client);
+                    Talk(client, port);
                 }
                 catch (Exception e)
                 {
@@ -100,30 +105,46 @@ namespace VoidCrewModLauncher.Bridge
                 finally
                 {
                     _connected = false;
-                    Welcomed = false;
                     try { client.Close(); } catch { }
                 }
                 Sleep(1000);
             }
         }
 
-        private void Talk(TcpClient client)
+        private void Talk(TcpClient client, int port)
         {
             client.NoDelay = true;
             NetworkStream stream = client.GetStream();
+            stream.WriteTimeout = WriteTimeout;
             var utf8 = new UTF8Encoding(false);
             var writer = new StreamWriter(stream, utf8) { NewLine = "\n", AutoFlush = true };
-            Decoder decoder = utf8.GetDecoder();
-            var bytes = new byte[16384];
-            var chars = new char[utf8.GetMaxCharCount(bytes.Length)];
-            var line = new StringBuilder();
+            var reader = new LineReader(stream, client.Client, utf8);
+
+            string nonce = BridgeAuth.NewNonce();
+            _hello.Nonce = nonce;
+            _hello.Proof = BridgeAuth.Proof(_token, BridgeAuth.HelloPurpose, nonce, port);
+            writer.WriteLine(Json.Write(_hello));
+
+            // Nothing else is accepted before the welcome, and it has to come soon.
+            string first = null;
+            for (int waited = 0; !_stop && waited < WelcomeTimeout && !reader.Closed; waited += 20)
+            {
+                if (reader.TryRead(out first)) break;
+                Thread.Sleep(20);
+            }
+            if (!IsWelcome(first, nonce, port))
+            {
+                if (!_stop) Log.Warn("The program on port " + port + " isn't this game's launcher; trying the launcher's other ports.");
+                _firstPort = (Array.IndexOf(_ports, port) + 1) % _ports.Length;
+                return;
+            }
 
             string stale;
             while (_outgoing.TryDequeue(out stale)) { }
-            writer.WriteLine(_helloLine);
-            _connected = true;
+            while (_incoming.TryDequeue(out stale)) { }
             Interlocked.Increment(ref _generation);
-            Log.Info("Connected to the Void Crew Mod Launcher.");
+            _connected = true;
+            Log.Info("Connected to the Void Crew Mod Launcher (" + (string)JObject.Parse(first)["launcherVersion"] + ").");
 
             while (!_stop)
             {
@@ -135,37 +156,38 @@ namespace VoidCrewModLauncher.Bridge
                     wrote = true;
                 }
 
-                if (stream.DataAvailable)
+                string inLine;
+                bool read = false;
+                while (reader.TryRead(out inLine))
                 {
-                    int read = stream.Read(bytes, 0, bytes.Length);
-                    if (read <= 0) return;
-                    int count = decoder.GetChars(bytes, 0, read, chars, 0);
-                    for (int i = 0; i < count; i++)
-                    {
-                        char c = chars[i];
-                        if (c == '\n')
-                        {
-                            if (line.Length > 0) _incoming.Enqueue(line.ToString());
-                            line.Length = 0;
-                        }
-                        else if (c != '\r')
-                        {
-                            line.Append(c);
-                        }
-                    }
-                    continue;
+                    _incoming.Enqueue(inLine);
+                    read = true;
                 }
-
-                // A readable socket with nothing to read means the launcher closed the connection.
-                if (client.Client.Poll(0, SelectMode.SelectRead) && client.Client.Available == 0) return;
-                if (!wrote) Thread.Sleep(15);
+                if (reader.Closed) return;
+                if (!wrote && !read) Thread.Sleep(15);
             }
         }
 
-        private TcpClient TryConnect()
+        private bool IsWelcome(string line, string nonce, int port)
         {
-            foreach (int port in _ports)
+            if (line == null) return false;
+            try
             {
+                JObject message = JObject.Parse(line);
+                return (string)message["type"] == MessageTypes.Welcome &&
+                       BridgeAuth.Check(_token, BridgeAuth.WelcomePurpose, nonce, port, (string)message["proof"]);
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        private TcpClient TryConnect(out int connectedPort)
+        {
+            for (int i = 0; i < _ports.Length; i++)
+            {
+                int port = _ports[(_firstPort + i) % _ports.Length];
                 var client = new TcpClient();
                 try
                 {
@@ -173,6 +195,7 @@ namespace VoidCrewModLauncher.Bridge
                     if (pending.AsyncWaitHandle.WaitOne(250) && client.Connected)
                     {
                         client.EndConnect(pending);
+                        connectedPort = port;
                         return client;
                     }
                 }
@@ -182,12 +205,80 @@ namespace VoidCrewModLauncher.Bridge
                 }
                 try { client.Close(); } catch { }
             }
+            // Next round, start from the launcher's first port again.
+            _firstPort = 0;
+            connectedPort = 0;
             return null;
         }
 
         private void Sleep(int milliseconds)
         {
             for (int waited = 0; waited < milliseconds && !_stop; waited += 100) Thread.Sleep(100);
+        }
+
+        /// <summary>Splits what the socket has into lines without blocking; a line that never ends closes the connection.</summary>
+        private sealed class LineReader
+        {
+            private readonly NetworkStream _stream;
+            private readonly Socket _socket;
+            private readonly Decoder _decoder;
+            private readonly byte[] _bytes = new byte[16384];
+            private readonly char[] _chars;
+            private readonly StringBuilder _line = new StringBuilder();
+            private readonly Queue<string> _lines = new Queue<string>();
+
+            public LineReader(NetworkStream stream, Socket socket, Encoding encoding)
+            {
+                _stream = stream;
+                _socket = socket;
+                _decoder = encoding.GetDecoder();
+                _chars = new char[encoding.GetMaxCharCount(_bytes.Length)];
+            }
+
+            public bool Closed { get; private set; }
+
+            public bool TryRead(out string line)
+            {
+                if (_lines.Count == 0 && !Closed) Fill();
+                if (_lines.Count > 0)
+                {
+                    line = _lines.Dequeue();
+                    return true;
+                }
+                line = null;
+                return false;
+            }
+
+            private void Fill()
+            {
+                if (!_stream.DataAvailable)
+                {
+                    // A readable socket with nothing to read means the other end closed the connection.
+                    if (_socket.Poll(0, SelectMode.SelectRead) && _socket.Available == 0) Closed = true;
+                    return;
+                }
+                int read = _stream.Read(_bytes, 0, _bytes.Length);
+                if (read <= 0)
+                {
+                    Closed = true;
+                    return;
+                }
+                int count = _decoder.GetChars(_bytes, 0, read, _chars, 0);
+                for (int i = 0; i < count; i++)
+                {
+                    char c = _chars[i];
+                    if (c == '\n')
+                    {
+                        if (_line.Length > 0) _lines.Enqueue(_line.ToString());
+                        _line.Length = 0;
+                    }
+                    else if (c != '\r')
+                    {
+                        _line.Append(c);
+                    }
+                }
+                if (_line.Length > MaxLine) throw new IOException("the launcher sent a line that never ends");
+            }
         }
     }
 }

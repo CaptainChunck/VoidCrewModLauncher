@@ -15,6 +15,8 @@ namespace VoidCrewModLauncher.Bridge
         private const string Sender = "Mod Launcher";
         private const float SettleTime = 5f;
         private const float RetryTime = 5f;
+        private const float LineGap = 2f;
+        private const int MaxWaiting = 10;
 
         private static readonly Queue<string> Waiting = new Queue<string>();
         private static TextChat _chat;
@@ -23,7 +25,7 @@ namespace VoidCrewModLauncher.Bridge
 
         public static void Add(string text)
         {
-            if (string.IsNullOrEmpty(text)) return;
+            if (string.IsNullOrEmpty(text) || Waiting.Contains(text) || Waiting.Count >= MaxWaiting) return;
             Log.Info("Notice for the player: " + text);
             Waiting.Enqueue(text);
         }
@@ -43,21 +45,19 @@ namespace VoidCrewModLauncher.Bridge
             float now = Time.realtimeSinceStartup;
             if (now - _chatSince < SettleTime || now < _nextTry) return;
 
-            while (Waiting.Count > 0)
+            // One line at a time, a little apart, so several never flood the chat at once.
+            try
             {
-                try
-                {
-                    chat.AddLog(new LogEntry(Sender, Waiting.Peek()));
-                    Log.Info("Showed the notice in the chat (" + phase + ").");
-                    Waiting.Dequeue();
-                }
-                catch (Exception e)
-                {
-                    // The chat isn't ready after all; the line waits for the next try.
-                    Log.Warn("Couldn't show a notice in the chat yet: " + e.Message);
-                    _nextTry = now + RetryTime;
-                    return;
-                }
+                chat.AddLog(new LogEntry(Sender, Waiting.Peek()));
+                Log.Info("Showed the notice in the chat (" + phase + ").");
+                Waiting.Dequeue();
+                _nextTry = now + LineGap;
+            }
+            catch (Exception e)
+            {
+                // The chat isn't ready after all; the line waits for the next try.
+                Log.Warn("Couldn't show a notice in the chat yet: " + e.Message);
+                _nextTry = now + RetryTime;
             }
         }
     }

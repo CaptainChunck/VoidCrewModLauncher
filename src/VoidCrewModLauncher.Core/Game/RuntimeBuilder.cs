@@ -74,7 +74,7 @@ public sealed class RuntimeBuilder
         {
             string name = Path.GetFileName(dir);
             if (keep != null && string.Equals(name, keep, StringComparison.OrdinalIgnoreCase)) continue;
-            if (!wanted.ContainsKey(name)) Directory.Delete(dir, true);
+            if (!wanted.ContainsKey(name)) FileTools.DeleteDirectory(dir);
         }
 
         foreach ((string name, (string marker, List<PackageFile> files)) in wanted)
@@ -82,12 +82,12 @@ public sealed class RuntimeBuilder
             string target = Path.Combine(folder, name);
             string markerPath = Path.Combine(target, MarkerFile);
             if (File.Exists(markerPath) && File.ReadAllText(markerPath) == marker) continue;
-            if (Directory.Exists(target)) Directory.Delete(target, true);
+            FileTools.DeleteDirectory(target);
             foreach (PackageFile file in files)
             {
                 string destination = Path.Combine(target, file.RelativePath);
                 Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                File.Copy(file.SourcePath, destination, true);
+                FileTools.CopyFile(file.SourcePath, destination);
             }
             File.WriteAllText(markerPath, marker);
         }
@@ -106,7 +106,7 @@ public sealed class RuntimeBuilder
             var existing = new FileInfo(destination);
             if (existing.Exists && existing.Length == source.Length && existing.LastWriteTimeUtc == source.LastWriteTimeUtc) continue;
             Directory.CreateDirectory(existing.DirectoryName!);
-            File.Copy(source.FullName, destination, true);
+            FileTools.CopyFile(source.FullName, destination);
         }
         foreach (string file in Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories).ToList())
         {
@@ -121,7 +121,7 @@ public sealed class RuntimeBuilder
             string destination = Path.Combine(bepInEx, "config", file.RelativePath);
             if (File.Exists(destination)) continue;
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-            File.Copy(file.SourcePath, destination);
+            FileTools.CopyFile(file.SourcePath, destination);
         }
     }
 
@@ -159,7 +159,7 @@ public sealed class RuntimeBuilder
     {
         try
         {
-            File.Delete(file);
+            FileTools.DeleteFile(file);
         }
         catch (Exception e)
         {

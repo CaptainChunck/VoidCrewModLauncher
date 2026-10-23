@@ -2,6 +2,6 @@
   <!-- One version for the launcher, its core and the bridge plugin. tools\package.ps1 checks that
        the bridge's BepInPlugin version matches it. -->
   <PropertyGroup>
-    <Version>0.6.2</Version>
+    <Version>0.7.0</Version>
   </PropertyGroup>
 </Project>

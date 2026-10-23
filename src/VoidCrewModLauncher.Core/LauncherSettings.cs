@@ -45,6 +45,10 @@ public sealed class LauncherSettings
 
     public BrowserSettings Browser { get; set; } = new();
 
+    /// <summary>
+    /// Reads settings.json, or starts from defaults when there is none or it is broken. Throws (an IOException) when the
+    /// file is there but can't be opened, rather than replacing the player's settings with defaults.
+    /// </summary>
     public static LauncherSettings Load(AppPaths paths)
     {
         LauncherSettings settings = JsonFiles.Load<LauncherSettings>(paths.SettingsFile) ?? new LauncherSettings();

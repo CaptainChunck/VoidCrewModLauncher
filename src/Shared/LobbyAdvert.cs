@@ -49,6 +49,9 @@ namespace VoidCrewModLauncher.Protocol
         /// <summary>Keeps the room property small; the lobby sends it to everyone browsing.</summary>
         public const int MaxMods = 64;
 
+        /// <summary>And short: Photon sends listed properties in every lobby list update.</summary>
+        public const int MaxLength = 2000;
+
         public static string Encode(IEnumerable<AdvertMod> mods)
         {
             var text = new StringBuilder(Header);
@@ -57,10 +60,10 @@ namespace VoidCrewModLauncher.Protocol
             {
                 if (mod == null || string.IsNullOrEmpty(mod.Id)) continue;
                 if (++count > MaxMods) break;
-                text.Append(';');
-                if (mod.Local) text.Append('#');
-                text.Append(Clean(mod.Id)).Append('@').Append(Clean(string.IsNullOrEmpty(mod.Version) ? "0" : mod.Version));
-                text.Append('!').Append((char)(mod.Need == 0 ? ModNeed.Unknown : mod.Need));
+                string entry = ";" + (mod.Local ? "#" : "") + Clean(mod.Id) + "@" + Clean(string.IsNullOrEmpty(mod.Version) ? "0" : mod.Version) +
+                               "!" + (char)(mod.Need == 0 ? ModNeed.Unknown : mod.Need);
+                if (text.Length + entry.Length > MaxLength) break;
+                text.Append(entry);
             }
             return text.ToString();
         }

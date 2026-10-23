@@ -72,10 +72,27 @@ public sealed class PackageIndex
         return new PackageIndex(All.Select(p => replaced.TryGetValue(p.FullName, out TsPackage? merged) ? merged : p).Concat(added));
     }
 
+    /// <summary>
+    /// This index without one version of a package (a GitHub release that turned out not to be the package); a package
+    /// left with no versions is left out. Returns this same index when it doesn't have that version.
+    /// </summary>
+    public PackageIndex WithoutVersion(string id, string version)
+    {
+        if (Find(id) is not { } package || package.Version(version) is not { } gone) return this;
+        TsPackage kept = package.WithVersions(Array.Empty<TsVersion>());
+        kept.Versions = package.Versions.Where(v => !ReferenceEquals(v, gone)).ToList();
+        return new PackageIndex(All.Select(p => ReferenceEquals(p, package) ? kept : p));
+    }
+
     public IReadOnlyList<TsPackage> All { get; }
 
     /// <summary>What the Mods tab lists: Thunderstore's mods, not BepInEx itself, not mod managers, not NSFW.</summary>
     public IEnumerable<TsPackage> Mods => All.Where(p => !p.IsGitHubOnly && !NotMods.Contains(p.FullName) && !p.HasNsfwContent && !IsBepInExPack(p.FullName));
+
+    /// <summary>The mods with their simplified names, worked out once per index (lobby lists look names up a lot).</summary>
+    private List<(TsPackage Package, string Name)>? _simpleNames;
+
+    private List<(TsPackage Package, string Name)> SimpleNames => _simpleNames ??= Mods.Select(p => (p, Simplify(p.Name))).ToList();
 
     public static bool IsBepInExPack(string id) => string.Equals(id, BepInExPackId, StringComparison.OrdinalIgnoreCase);
 
@@ -117,12 +134,11 @@ public sealed class PackageIndex
 
         TsPackage? best = null;
         int bestScore = 0;
-        foreach (TsPackage package in Mods)
+        foreach ((TsPackage package, string name) in SimpleNames)
         {
-            string name = Simplify(package.Name);
             int score = 0;
             if (name == wanted) score = 4;
-            else if (name == withoutGame || Simplify("VoidCrew" + package.Name) == wanted) score = 3;
+            else if (name == withoutGame || "voidcrew" + name == wanted) score = 3;
             else if (name.Length >= 6 && withoutGame.Length >= 6 && (name.Contains(withoutGame) || withoutGame.Contains(name))) score = 1;
             if (score == 0) continue;
             if (!package.IsDeprecated) score = score * 2 + 1;

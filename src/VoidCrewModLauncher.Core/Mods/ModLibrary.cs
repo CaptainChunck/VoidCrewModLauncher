@@ -7,6 +7,7 @@ public sealed class ModLibrary
     private readonly object _gate = new();
     private List<InstalledMod> _mods;
 
+    /// <summary>Reads library.json. Throws (an IOException) when it is there but can't be opened, so an unreadable library is never saved over as empty.</summary>
     public ModLibrary(AppPaths paths)
     {
         _paths = paths;

@@ -112,27 +112,68 @@ public sealed class LauncherService : IDisposable
     /// </summary>
     public async Task RefreshPackagesAsync(bool force, CancellationToken cancel = default)
     {
-        Task<List<TsPackage>> siteTask = Website.GetPackagesAsync(force, cancel);
-        List<TsPackage> packages;
+        // Packages merged while this refresh runs (a lobby's versions, say) go into the new list too.
+        var mergedMeanwhile = new List<TsPackage>();
+        lock (_refreshes) _refreshes.Add(mergedMeanwhile);
         try
         {
-            packages = await Thunderstore.GetPackagesAsync(force, cancel);
+            Task<List<TsPackage>> siteTask = Website.GetPackagesAsync(force, cancel);
+            List<TsPackage> packages;
+            try
+            {
+                packages = await Thunderstore.GetPackagesAsync(force, cancel);
+            }
+            catch (Exception e) when (e is not OperationCanceledException || !cancel.IsCancellationRequested)
+            {
+                // Thunderstore is down (or timed out): voidcrewmod.com's mods still work when it answered.
+                if ((await siteTask).Count == 0) throw;
+                AppLog.Warn($"Thunderstore couldn't be reached ({e.Message}); using voidcrewmod.com's mods only.");
+                packages = new List<TsPackage>();
+            }
+            // voidcrewmod.com first: its versions and downloads win over Thunderstore's for a mod both have.
+            var index = new PackageIndex(packages).Prefer(await siteTask);
+            List<string> installed = Library.Mods.Where(m => m.Source == ModSource.Thunderstore).Select(m => m.Id).ToList();
+            if (!Thunderstore.IsOffline) index = index.Merge(await Thunderstore.GetCurrentAsync(installed, cancel));
+            index = index.Merge(await NewerOnGitHubAsync(installed.Select(index.Find).OfType<TsPackage>(), cancel));
+            index = index.Merge(await GitHubOnlyAsync(GitHubModsInUse(), cancel));
+            Mods.UpdateIndex(_ =>
+            {
+                lock (_refreshes) return index.Merge(mergedMeanwhile.ToList());
+            });
         }
-        catch (Exception e) when (e is not OperationCanceledException)
+        finally
         {
-            // Thunderstore is down: voidcrewmod.com's mods still work when it answered.
-            if ((await siteTask).Count == 0) throw;
-            AppLog.Warn($"Thunderstore couldn't be reached ({e.Message}); using voidcrewmod.com's mods only.");
-            packages = new List<TsPackage>();
+            lock (_refreshes) _refreshes.Remove(mergedMeanwhile);
         }
-        // voidcrewmod.com first: its versions and downloads win over Thunderstore's for a mod both have.
-        var index = new PackageIndex(packages).Prefer(await siteTask);
-        List<string> installed = Library.Mods.Where(m => m.Source == ModSource.Thunderstore).Select(m => m.Id).ToList();
-        if (!Thunderstore.IsOffline) index = index.Merge(await Thunderstore.GetCurrentAsync(installed, cancel));
-        index = index.Merge(await NewerOnGitHubAsync(installed.Select(index.Find).OfType<TsPackage>(), cancel));
-        index = index.Merge(await GitHubOnlyAsync(GitHubModsInUse(), cancel));
-        Mods.Index = index;
         PackagesChanged?.Invoke();
+    }
+
+    /// <summary>For each refresh that is running, the packages merged since it started.</summary>
+    private readonly List<List<TsPackage>> _refreshes = new();
+
+    /// <summary>How many GitHub (or lobby) lookups run at once.</summary>
+    private const int ParallelLookups = 4;
+
+    /// <summary>How many of a lobby's mods are looked up (lobbies come from other players).</summary>
+    private const int MaxLobbyLookups = 32;
+
+    /// <summary>Runs <paramref name="work"/> for each item, a few at a time, and returns the answers that aren't null, in order.</summary>
+    private static async Task<List<TResult>> FewAtATimeAsync<T, TResult>(IEnumerable<T> items, Func<T, Task<TResult?>> work, CancellationToken cancel) where TResult : class
+    {
+        using var slots = new SemaphoreSlim(ParallelLookups, ParallelLookups);
+        TResult?[] results = await Task.WhenAll(items.Select(async item =>
+        {
+            await slots.WaitAsync(cancel);
+            try
+            {
+                return await work(item);
+            }
+            finally
+            {
+                slots.Release();
+            }
+        }));
+        return results.OfType<TResult>().ToList();
     }
 
     /// <summary>
@@ -141,17 +182,30 @@ public sealed class LauncherService : IDisposable
     /// </summary>
     private async Task<List<TsPackage>> NewerOnGitHubAsync(IEnumerable<TsPackage> packages, CancellationToken cancel)
     {
-        var newer = new List<TsPackage>();
-        if (!Settings.GitHubUpdates) return newer;
-        foreach (TsPackage package in packages)
+        if (!Settings.GitHubUpdates) return new List<TsPackage>();
+        return await FewAtATimeAsync<TsPackage, TsPackage>(packages.ToList(), async package =>
         {
-            if (package.LatestOnThunderstore is not { } newest || GitHubRepo.Parse(newest.WebsiteUrl) is not { } repo) continue;
+            if (package.LatestOnThunderstore is not { } newest || GitHubRepo.Parse(newest.WebsiteUrl) is not { } repo) return null;
             TsVersion? release = await GitHub.GetLatestReleaseAsync(repo, package, cancel);
-            if (release == null || VersionNumber.Compare(release.VersionNumber, newest.VersionNumber) <= 0) continue;
+            if (release == null || VersionNumber.Compare(release.VersionNumber, newest.VersionNumber) <= 0 || !Usable(package, release)) return null;
             AppLog.Info($"{package.FullName} {release.VersionNumber} is on GitHub ({repo}); Thunderstore has {newest.VersionNumber}.");
-            newer.Add(package.WithVersions(new[] { release }));
-        }
-        return newer;
+            return package.WithVersions(new[] { release });
+        }, cancel);
+    }
+
+    /// <summary>
+    /// A GitHub version worth offering: not one that failed to install this session, and for plugin DLLs, each one
+    /// replaces a file of the Thunderstore version when that version is already downloaded.
+    /// </summary>
+    private bool Usable(TsPackage package, TsVersion release)
+    {
+        if (Mods.IsRefused(release)) return false;
+        if (release.GitHub is not { Package: null, Base: { } basis } github || !Store.Has(package.FullName, basis.VersionNumber)) return true;
+        string folder = Store.VersionDirectory(package.FullName, basis.VersionNumber);
+        var files = new HashSet<string>(Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories).Select(Path.GetFileName).OfType<string>(), StringComparer.OrdinalIgnoreCase);
+        if (github.Plugins.All(p => files.Contains(p.Name))) return true;
+        AppLog.Warn($"{package.FullName} {release.VersionNumber} on GitHub ({github.Repo}) has DLLs that aren't files of the mod; not offering it.");
+        return false;
     }
 
     /// <summary>
@@ -187,19 +241,24 @@ public sealed class LauncherService : IDisposable
     /// </summary>
     public async Task<bool> FreshenLobbyAsync(Lobby lobby, CancellationToken cancel = default)
     {
-        var fresh = new List<TsPackage>();
-        foreach (LobbyMod mod in lobby.Mods.Where(m => !m.Local && m.PackageVersion == null && m.PackageId != null))
+        // The lobby's list comes from another player: only real ids and version numbers, and only so many of them.
+        List<LobbyMod> wanted = lobby.Mods
+            .Where(m => !m.Local && m.PackageVersion == null && PackageReference.Parse(m.PackageId) != null && VersionNumber.IsValid(m.Version))
+            .GroupBy(m => $"{m.PackageId}@{m.Version}", StringComparer.OrdinalIgnoreCase).Select(g => g.First())
+            .Take(MaxLobbyLookups).ToList();
+        List<TsPackage> fresh = await FewAtATimeAsync<LobbyMod, TsPackage>(wanted, async mod =>
         {
             TsVersion? exact = await Thunderstore.GetVersionAsync(mod.PackageId!, mod.Version, cancel);
             TsPackage? package = mod.Package ?? Index.Find(mod.PackageId) ?? (await Thunderstore.GetCurrentAsync(new[] { mod.PackageId! }, cancel)).FirstOrDefault();
-            if (package == null) continue;
+            if (package == null) return null;
             // A host who got a newer version from the mod's GitHub releases: the same release.
             if (exact == null && Settings.GitHubUpdates && GitHubRepo.Parse(package.LatestOnThunderstore?.WebsiteUrl) is { } repo)
             {
                 exact = await GitHub.GetReleaseAsync(repo, package, mod.Version, cancel);
+                if (exact != null && !Usable(package, exact)) exact = null;
             }
-            if (exact != null) fresh.Add(package.WithVersions(new[] { exact }));
-        }
+            return exact != null ? package.WithVersions(new[] { exact }) : null;
+        }, cancel);
         return Merge(fresh);
     }
 
@@ -207,10 +266,19 @@ public sealed class LauncherService : IDisposable
     private bool Merge(List<TsPackage> fresh)
     {
         if (fresh.Count == 0) return false;
-        PackageIndex before = Mods.Index;
-        PackageIndex merged = before.Merge(fresh);
-        if (ReferenceEquals(merged, before)) return false;
-        Mods.Index = merged;
+        bool changed = false;
+        Mods.UpdateIndex(before =>
+        {
+            PackageIndex merged = before.Merge(fresh);
+            changed = !ReferenceEquals(merged, before);
+            // A refresh that is building a new list keeps these too.
+            lock (_refreshes)
+            {
+                foreach (List<TsPackage> refresh in _refreshes) refresh.AddRange(fresh);
+            }
+            return merged;
+        });
+        if (!changed) return false;
         PackagesFreshened?.Invoke(fresh.Select(p => p.FullName).Distinct(StringComparer.OrdinalIgnoreCase).ToList());
         return true;
     }
@@ -248,15 +316,9 @@ public sealed class LauncherService : IDisposable
         Library.Find(m.Id) != null || Library.Mods.Any(mine => GitHubMods.NeededBy(mine.Id).Contains(m)));
 
     /// <summary>The newest releases of GitHub-only mods, as packages for the list.</summary>
-    private async Task<List<TsPackage>> GitHubOnlyAsync(IEnumerable<GitHubMod> mods, CancellationToken cancel)
-    {
-        var packages = new List<TsPackage>();
-        foreach (GitHubMod mod in mods)
-        {
-            if (await GitHub.GetModAsync(mod, cancel) is { } package) packages.Add(package);
-        }
-        return packages;
-    }
+    private async Task<List<TsPackage>> GitHubOnlyAsync(IEnumerable<GitHubMod> mods, CancellationToken cancel) =>
+        await FewAtATimeAsync<GitHubMod, TsPackage>(mods.ToList(), async mod =>
+            await GitHub.GetModAsync(mod, cancel) is { Latest: { } latest } package && !Mods.IsRefused(latest) ? package : null, cancel);
 
     /// <summary>
     /// Installs the GitHub-only mods <paramref name="id"/> needs (UUVR for the VR UI Fix) at their newest release, or turns
@@ -331,9 +393,12 @@ public sealed class LauncherService : IDisposable
             try
             {
                 await Mods.UpdateAsync(mod.Id, status, cancel);
-                updated.Add($"{mod.DisplayName} {latest.VersionNumber}");
+                // A GitHub version that turned out unusable falls back to Thunderstore's, which may be the one you had.
+                string now = Library.Find(mod.Id)?.Version ?? mod.Version;
+                if (VersionNumber.Compare(now, mod.Version) > 0) updated.Add($"{mod.DisplayName} {now}");
+                else failed.Add(mod.DisplayName);
             }
-            catch (Exception e) when (e is not OperationCanceledException)
+            catch (Exception e) when (e is not OperationCanceledException || !cancel.IsCancellationRequested)
             {
                 AppLog.Error($"Updating {mod.Id} to {latest.VersionNumber} failed", e);
                 failed.Add(mod.DisplayName);
@@ -375,10 +440,10 @@ public sealed class LauncherService : IDisposable
             // An enabled copy Thunderstore no longer lists is already in; don't load a second version next to it.
             if (mods.Any(m => string.Equals(m.Id, package.FullName, StringComparison.OrdinalIgnoreCase))) continue;
             if (!enabledIds.Contains(package.FullName)) AppLog.Info($"Also loading {package.FullName} {version.VersionNumber}: another enabled mod needs it.");
-            string folder = await Store.EnsureAsync(version, new SyncProgress<double>(f => Report($"Downloading {package.DisplayName} {version.VersionNumber}", f)), cancel);
+            (string folder, TsVersion used) = await Mods.EnsureAsync(package, version, new SyncProgress<double>(f => Report($"Downloading {package.DisplayName} {version.VersionNumber}", f)), cancel);
             bool byUser = Settings.Host.ModNeeds.TryGetValue(package.FullName, out ModNeed chosen);
             ModNeed need = byUser ? chosen : ModPolicy.GuessNeed(package.FullName, package.Categories);
-            mods.Add(new RuntimeMod(package.FullName, package.Name, version.VersionNumber, folder, false, need, byUser));
+            mods.Add(new RuntimeMod(package.FullName, package.Name, used.VersionNumber, folder, false, need, byUser));
         }
 
         // GitHub-only mods your turned-on mods need (UUVR for the VR UI Fix) load with them, like dependencies.

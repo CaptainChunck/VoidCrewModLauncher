@@ -56,11 +56,7 @@ public partial class MainViewModel : ObservableObject
             Browser.RefreshLobbies();
             OnPropertyChanged(nameof(ThunderstoreText));
         });
-        service.PackagesFreshened += ids => OnUi(() =>
-        {
-            Mods.OnPackagesFreshened(ids);
-            Browser.RefreshLobbies();
-        });
+        service.PackagesFreshened += ids => OnUi(() => OnPackagesFreshened(ids));
         service.Library.Changed += () => OnUi(() =>
         {
             Mods.RefreshInstalled();
@@ -91,6 +87,33 @@ public partial class MainViewModel : ObservableObject
 
     private readonly DispatcherTimer? _playingTimer;
     private bool _checkingWhilePlaying;
+
+    /// <summary>Packages freshened since the lists were last drawn again.</summary>
+    private readonly HashSet<string> _freshened = new(StringComparer.OrdinalIgnoreCase);
+
+    private DispatcherTimer? _freshenedTimer;
+
+    /// <summary>
+    /// Newer data for some packages: the lists are drawn again a moment later, once for everything that arrived meanwhile
+    /// (the server browser looks up many lobbies' mods at once).
+    /// </summary>
+    private void OnPackagesFreshened(IReadOnlyCollection<string> ids)
+    {
+        _freshened.UnionWith(ids);
+        if (_freshenedTimer == null)
+        {
+            _freshenedTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher) { Interval = TimeSpan.FromMilliseconds(300) };
+            _freshenedTimer.Tick += (_, _) =>
+            {
+                _freshenedTimer?.Stop();
+                List<string> all = _freshened.ToList();
+                _freshened.Clear();
+                Mods.OnPackagesFreshened(all);
+                Browser.RefreshLobbies();
+            };
+        }
+        if (!_freshenedTimer.IsEnabled) _freshenedTimer.Start();
+    }
 
     public LauncherService Service { get; }
     public Dialogs Dialogs { get; }
@@ -175,9 +198,42 @@ public partial class MainViewModel : ObservableObject
     /// <summary>The launch whose game process has been seen; once it has, the process going away means the game closed.</summary>
     private DateTime? _seenLaunch;
 
+    /// <summary>The game's process once found: watched with HasExited instead of looking it up by name every second.</summary>
+    private System.Diagnostics.Process? _gameProcess;
+
+    private DateTime _gameScanUtc;
+
+    /// <summary>How often the processes are searched for the game while it isn't known to run.</summary>
+    private static readonly TimeSpan GameScanInterval = TimeSpan.FromSeconds(3);
+
+    private bool IsGameRunning()
+    {
+        if (_gameProcess != null)
+        {
+            try
+            {
+                if (!_gameProcess.HasExited) return true;
+            }
+            catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception)
+            {
+                // It can't be watched (it runs as administrator): look it up by name instead.
+                _gameProcess.Dispose();
+                _gameProcess = null;
+                return GameProcess.IsRunning();
+            }
+            _gameProcess.Dispose();
+            _gameProcess = null;
+        }
+        // A connected bridge means the game runs: look now rather than show it closed for a moment.
+        if (DateTime.UtcNow - _gameScanUtc < GameScanInterval && !Service.Bridge.IsConnected) return false;
+        _gameScanUtc = DateTime.UtcNow;
+        _gameProcess = GameProcess.Find();
+        return _gameProcess != null;
+    }
+
     public void UpdateGameState()
     {
-        bool running = GameProcess.IsRunning();
+        bool running = IsGameRunning();
         bool recentlyLaunched = Service.LastLaunchUtc is { } launched && DateTime.UtcNow - launched < TimeSpan.FromMinutes(3);
         if (running) _seenLaunch = Service.LastLaunchUtc;
         bool waitingForProcess = _seenLaunch != Service.LastLaunchUtc && recentlyLaunched && DateTime.UtcNow - Service.LastLaunchUtc!.Value < TimeSpan.FromSeconds(150);
@@ -310,8 +366,7 @@ public partial class MainViewModel : ObservableObject
     /// </summary>
     public async Task<bool> RunAsync(string what, Func<Task> work)
     {
-        if (!CheckIdle(what) || Interlocked.Exchange(ref _busy, 1) == 1) return false;
-        IsBusy = true;
+        if (!CheckIdle(what) || !TryClaimBusy()) return false;
         try
         {
             SetStatus(what + "...");
@@ -351,11 +406,32 @@ public partial class MainViewModel : ObservableObject
         }
         finally
         {
-            IsBusy = false;
-            Interlocked.Exchange(ref _busy, 0);
+            ReleaseBusy();
             UpdateGameState();
         }
     }
+
+    private bool TryClaimBusy()
+    {
+        if (Interlocked.Exchange(ref _busy, 1) == 1) return false;
+        IsBusy = true;
+        return true;
+    }
+
+    private void ReleaseBusy()
+    {
+        IsBusy = false;
+        Interlocked.Exchange(ref _busy, 0);
+    }
+
+    /// <summary>Waits, however long it takes, until no long task runs.</summary>
+    private async Task WaitUntilIdleAsync()
+    {
+        while (IsBusy) await Task.Delay(250);
+    }
+
+    /// <summary>Set when the launcher closes for its self-update (the window closes without asking).</summary>
+    public bool ClosingForUpdate { get; private set; }
 
     /// <summary>
     /// Start-up: a new launcher from GitHub first (it restarts the launcher), then Thunderstore's list (from the cache when
@@ -365,33 +441,47 @@ public partial class MainViewModel : ObservableObject
     /// <param name="link">A voidcrewmod:// link the launcher was started with, handled once the mod list is loaded.</param>
     public async Task StartAsync(string? updatedFrom = null, string? link = null)
     {
-        if (updatedFrom != null)
-        {
-            Updater.CleanUp();
-            AppLog.Info($"The launcher updated itself from {updatedFrom} to {AppInfo.Version}.");
-        }
-        else if (Service.Settings.AutoUpdateLauncher && await UpdateLauncherAsync(manual: false))
-        {
-            return;
-        }
-
-        string updatedText = updatedFrom != null ? $"Updated the launcher to {AppInfo.Version}. " : "";
+        // Links wait for this; whatever fails here, they mustn't wait forever.
         try
         {
-            SetStatus("Loading Thunderstore's Void Crew mods...");
-            await Service.RefreshPackagesAsync(false);
-            string? modsText = Service.Settings.AutoUpdateMods ? await UpdateModsAsync() : null;
-            string? githubText = await AddMissingGitHubModsAsync();
-            if (githubText != null) modsText = modsText == null ? githubText : modsText + " " + githubText;
-            int updates = Service.Mods.Updates().Count;
-            SetStatus(updatedText + (modsText ?? (updates > 0 ? $"{updates} of your mods can be updated (MOD MANAGER)." : "Ready.")));
+            try
+            {
+                if (updatedFrom != null)
+                {
+                    Updater.CleanUp();
+                    AppLog.Info($"The launcher updated itself from {updatedFrom} to {AppInfo.Version}.");
+                }
+                else if (Service.Settings.AutoUpdateLauncher && await UpdateLauncherAsync(manual: false))
+                {
+                    return;
+                }
+            }
+            catch (Exception e)
+            {
+                AppLog.Error("Updating the launcher failed", e);
+            }
+
+            string updatedText = updatedFrom != null ? $"Updated the launcher to {AppInfo.Version}. " : "";
+            try
+            {
+                SetStatus("Loading Thunderstore's Void Crew mods...");
+                await Service.RefreshPackagesAsync(false);
+                string? modsText = Service.Settings.AutoUpdateMods ? await UpdateModsAsync() : null;
+                string? githubText = await AddMissingGitHubModsAsync();
+                if (githubText != null) modsText = modsText == null ? githubText : modsText + " " + githubText;
+                int updates = Service.Mods.Updates().Count;
+                SetStatus(updatedText + (modsText ?? (updates > 0 ? $"{updates} of your mods can be updated (MOD MANAGER)." : "Ready.")));
+            }
+            catch (Exception e)
+            {
+                AppLog.Error("Loading Thunderstore's mod list failed", e);
+                SetStatus(updatedText + "Thunderstore couldn't be reached. Mods you have still work; try REFRESH on the MODS tab later.");
+            }
         }
-        catch (Exception e)
+        finally
         {
-            AppLog.Error("Loading Thunderstore's mod list failed", e);
-            SetStatus(updatedText + "Thunderstore couldn't be reached. Mods you have still work; try REFRESH on the MODS tab later.");
+            _started.TrySetResult();
         }
-        _started.TrySetResult();
         if (link != null) await HandleLinkAsync(link);
         if (Service.GameDirectory == null)
         {
@@ -411,6 +501,22 @@ public partial class MainViewModel : ObservableObject
     {
         AppLog.Info($"Link: {text}");
         ShowWindow();
+        // One link at a time: a second one waits until the first is installed or declined.
+        await _links.WaitAsync();
+        try
+        {
+            await HandleOneLinkAsync(text);
+        }
+        finally
+        {
+            _links.Release();
+        }
+    }
+
+    private readonly SemaphoreSlim _links = new(1, 1);
+
+    private async Task HandleOneLinkAsync(string text)
+    {
         LauncherLink? link = LauncherLinks.Parse(text);
         if (link == null)
         {
@@ -420,7 +526,7 @@ public partial class MainViewModel : ObservableObject
         if (link.Action != LinkAction.Install || link.ModId == null) return;
 
         await _started.Task;
-        for (int i = 0; i < 600 && IsBusy; i++) await Task.Delay(100);
+        await WaitUntilIdleAsync();
         SetStatus($"Looking up {link.ModId}...");
         try
         {
@@ -449,8 +555,21 @@ public partial class MainViewModel : ObservableObject
         Mods.ShowBrowse = false;
         if (mine != null && Core.Thunderstore.VersionNumber.Same(mine.Version, version))
         {
-            if (!mine.Enabled) await RunAsync($"Turning on {mine.DisplayName}", () => Service.SetModEnabledAsync(mine.Id, true, null));
-            SetStatus($"{package.DisplayName} {version} is installed and on.");
+            if (mine.Enabled)
+            {
+                SetStatus($"{package.DisplayName} {version} is installed and on.");
+                return;
+            }
+            if (!Dialogs.Confirm("Turn on mod", $"A link asked the launcher to turn on {package.DisplayName} {version} by {package.Author}, which you have switched off.", "TURN ON"))
+            {
+                SetStatus("Ready.");
+                return;
+            }
+            await WaitUntilIdleAsync();
+            if (await RunAsync($"Turning on {mine.DisplayName}", () => Service.SetModEnabledAsync(mine.Id, true, null)))
+            {
+                SetStatus($"{package.DisplayName} {version} is installed and on.");
+            }
             return;
         }
 
@@ -463,6 +582,8 @@ public partial class MainViewModel : ObservableObject
             SetStatus("Ready.");
             return;
         }
+        // Something may have started while the question was up.
+        await WaitUntilIdleAsync();
         var progress = new SyncProgress<InstallStatus>(s => OnUi(() => SetStatus(s.Message, s.Fraction)));
         bool ok = await RunAsync($"Installing {package.DisplayName}", async () =>
         {
@@ -593,6 +714,7 @@ public partial class MainViewModel : ObservableObject
             if (manual) SetStatus("This is a developer build; it doesn't update itself.");
             return false;
         }
+        if (manual && !CheckIdle("Checking for updates")) return false;
         using var updater = new Updater();
         LauncherRelease? release;
         try
@@ -620,37 +742,51 @@ public partial class MainViewModel : ObservableObject
             return false;
         }
 
-        AppLog.Info($"Updating the launcher from {AppInfo.Version} to {release.Version}.");
-        string? setup = UpdateWindow.Download(Application.Current?.MainWindow, updater, release, out Exception? error);
-        if (setup == null)
+        // Busy from the download window until the launcher closes: nothing else starts meanwhile.
+        if (!TryClaimBusy())
         {
-            if (error == null || error is OperationCanceledException)
-            {
-                SetStatus($"Update to {release.Version} cancelled. The launcher tries again next time it starts.");
-            }
-            else
-            {
-                AppLog.Error($"Downloading launcher {release.Version} failed", error);
-                SetStatus($"The launcher couldn't update to {release.Version}: {error.Message}");
-            }
+            if (manual) CheckIdle("Checking for updates");
             return false;
         }
-
-        settings.UpdateTriedVersion = release.Version;
-        settings.UpdateTriedUtc = DateTime.UtcNow;
-        Service.SaveSettings();
         try
         {
-            Installer.StartUpdate(setup, Environment.ProcessPath!, LauncherArguments.Concat(new[] { Installer.UpdatedArgument, AppInfo.Version }));
+            AppLog.Info($"Updating the launcher from {AppInfo.Version} to {release.Version}.");
+            string? setup = UpdateWindow.Download(Application.Current?.MainWindow, updater, release, out Exception? error);
+            if (setup == null)
+            {
+                if (error == null || error is OperationCanceledException)
+                {
+                    SetStatus($"Update to {release.Version} cancelled. The launcher tries again next time it starts.");
+                }
+                else
+                {
+                    AppLog.Error($"Downloading launcher {release.Version} failed", error);
+                    SetStatus($"The launcher couldn't update to {release.Version}: {error.Message}");
+                }
+                return false;
+            }
+
+            settings.UpdateTriedVersion = release.Version;
+            settings.UpdateTriedUtc = DateTime.UtcNow;
+            Service.SaveSettings();
+            try
+            {
+                Installer.StartUpdate(setup, Environment.ProcessPath!, LauncherArguments.Concat(new[] { Installer.UpdatedArgument, AppInfo.Version }));
+            }
+            catch (Exception e)
+            {
+                AppLog.Error("Starting the launcher update failed", e);
+                SetStatus($"The launcher couldn't update to {release.Version}: {e.Message}");
+                return false;
+            }
+            ClosingForUpdate = true;
+            Application.Current?.Shutdown();
+            return true;
         }
-        catch (Exception e)
+        finally
         {
-            AppLog.Error("Starting the launcher update failed", e);
-            SetStatus($"The launcher couldn't update to {release.Version}: {e.Message}");
-            return false;
+            if (!ClosingForUpdate) ReleaseBusy();
         }
-        Application.Current?.Shutdown();
-        return true;
     }
 
     public static void Ui(Action action) => Application.Current?.Dispatcher.BeginInvoke(action);

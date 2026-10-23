@@ -28,6 +28,9 @@ public static class Doorstop
     public const string VersionFile = ".doorstop_version";
     private const string LauncherMarker = "# Installed by the Void Crew Mod Launcher";
 
+    /// <summary>In the launcher's config: the .doorstop_version it added (one that was already there isn't removed with it).</summary>
+    private const string AddedVersionMarker = "# Added .doorstop_version: ";
+
     /// <summary>The other names Doorstop's proxy can have.</summary>
     private static readonly string[] OtherProxyFiles = ["version.dll", "winmm.dll"];
 
@@ -115,21 +118,28 @@ public static class Doorstop
         string configPath = Path.Combine(gameDirectory, ConfigFile);
         if (File.Exists(configPath))
         {
-            throw new InvalidOperationException(
-                $"Void Crew's folder has a doorstop_config.ini from another BepInEx install, but not its winhttp.dll. To use the launcher, " +
-                $"delete doorstop_config.ini (and .doorstop_version, if it's there) from\n{gameDirectory}\nor put that install's winhttp.dll back.");
+            // The launcher's own config without its dll: an earlier install stopped half way. Start again.
+            if (IsOurs(configPath)) File.Delete(configPath);
+            else
+            {
+                throw new InvalidOperationException(
+                    $"Void Crew's folder has a doorstop_config.ini from another BepInEx install, but not its winhttp.dll. To use the launcher, " +
+                    $"delete doorstop_config.ini (and .doorstop_version, if it's there) from\n{gameDirectory}\nor put that install's winhttp.dll back.");
+            }
         }
         string pack = Path.Combine(bepInExPackDirectory, "BepInExPack");
         string proxy = Path.Combine(pack, ProxyFile);
         if (!File.Exists(proxy)) throw new FileNotFoundException("The BepInExPack in the launcher's store has no winhttp.dll.", proxy);
 
-        File.Copy(proxy, Path.Combine(gameDirectory, ProxyFile));
         string versionFile = Path.Combine(pack, VersionFile);
         string gameVersionFile = Path.Combine(gameDirectory, VersionFile);
-        if (File.Exists(versionFile) && !File.Exists(gameVersionFile)) File.Copy(versionFile, gameVersionFile);
+        string? addedVersion = File.Exists(versionFile) && !File.Exists(gameVersionFile) ? File.ReadAllText(versionFile).Trim() : null;
+
+        // The marked config goes in before the dll: whenever our dll is there, so is the mark that says it's ours.
         var config = new StringBuilder();
         config.AppendLine(LauncherMarker + ". Off unless the launcher starts the game with mods; delete this file and");
         config.AppendLine("# winhttp.dll to remove it (the game itself is not changed).");
+        if (addedVersion != null) config.AppendLine(AddedVersionMarker + addedVersion);
         config.AppendLine("[General]");
         config.AppendLine("enabled = false");
         config.AppendLine(@"target_assembly = BepInEx\core\BepInEx.Preloader.dll");
@@ -147,7 +157,80 @@ public static class Doorstop
         {
             writer.Write(config.ToString());
         }
+        try
+        {
+            File.Copy(proxy, Path.Combine(gameDirectory, ProxyFile));
+        }
+        catch
+        {
+            try
+            {
+                File.Delete(configPath);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                // Marked as ours, so the next try replaces it.
+            }
+            throw;
+        }
+        if (addedVersion != null)
+        {
+            try
+            {
+                File.Copy(versionFile, gameVersionFile);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                AppLog.Warn($"Could not add {VersionFile} to {gameDirectory}: {e.Message}");
+            }
+        }
         AppLog.Info($"Added BepInEx's loader (Doorstop) to {gameDirectory}, off for normal launches.");
+    }
+
+    /// <summary>
+    /// Removes the loader the launcher added (nothing when it isn't the launcher's): winhttp.dll first, then the config
+    /// that marks it as ours, then .doorstop_version only if the launcher put it there (its config says so, or it matches
+    /// the copy in one of <paramref name="bepInExPackDirectories"/>). False when something couldn't be deleted.
+    /// </summary>
+    public static bool Remove(string gameDirectory, IEnumerable<string>? bepInExPackDirectories = null)
+    {
+        if (!Inspect(gameDirectory).InstalledByLauncher) return false;
+        string configPath = Path.Combine(gameDirectory, ConfigFile);
+        string versionPath = Path.Combine(gameDirectory, VersionFile);
+        bool removeVersion = false;
+        try
+        {
+            if (File.Exists(versionPath))
+            {
+                string installed = File.ReadAllText(versionPath).Trim();
+                string? recorded = File.ReadLines(configPath).Select(l => l.Trim())
+                    .FirstOrDefault(l => l.StartsWith(AddedVersionMarker, StringComparison.Ordinal))?[AddedVersionMarker.Length..].Trim();
+                removeVersion = recorded == installed || (bepInExPackDirectories ?? Enumerable.Empty<string>())
+                    .Select(pack => Path.Combine(pack, "BepInExPack", VersionFile))
+                    .Any(shipped => File.Exists(shipped) && File.ReadAllText(shipped).Trim() == installed);
+            }
+            File.Delete(Path.Combine(gameDirectory, ProxyFile));
+            File.Delete(configPath);
+            if (removeVersion) File.Delete(versionPath);
+            return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            AppLog.Warn($"Could not remove the loader from {gameDirectory}: {e.Message}");
+            return false;
+        }
+    }
+
+    private static bool IsOurs(string configPath)
+    {
+        try
+        {
+            return File.ReadLines(configPath).Any(l => l.Trim().StartsWith(LauncherMarker, StringComparison.Ordinal));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     /// <summary>

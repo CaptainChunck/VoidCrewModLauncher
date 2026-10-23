@@ -16,6 +16,7 @@ public sealed class BridgeServer : IDisposable
 {
     private readonly string _token;
     private readonly CancellationTokenSource _stop = new();
+    private readonly HashSet<string> _seenNonces = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _writeGate = new(1, 1);
     private TcpListener? _listener;
     private Connection? _current;
@@ -104,7 +105,8 @@ public sealed class BridgeServer : IDisposable
                 helloTimeout.CancelAfter(TimeSpan.FromSeconds(10));
                 string? first = await reader.ReadLineAsync(helloTimeout.Token);
                 HelloMessage? hello = first == null ? null : Parse<HelloMessage>(first, MessageTypes.Hello);
-                if (hello == null || !string.Equals(hello.Token, _token, StringComparison.Ordinal))
+                int port = ((IPEndPoint)client.Client.LocalEndPoint!).Port;
+                if (hello == null || !BridgeAuth.Check(_token, BridgeAuth.HelloPurpose, hello.Nonce, port, hello.Proof) || !FirstUse(hello.Nonce))
                 {
                     AppLog.Warn("Something connected to the launcher's bridge port without this launcher's token; closed it.");
                     return;
@@ -115,7 +117,7 @@ public sealed class BridgeServer : IDisposable
                 Hello = hello;
                 State = null;
                 Rooms = null;
-                await SendOn(connection, new WelcomeMessage { Token = _token, LauncherVersion = AppInfo.Version });
+                await SendOn(connection, new WelcomeMessage { Proof = BridgeAuth.Proof(_token, BridgeAuth.WelcomePurpose, hello.Nonce, port), LauncherVersion = AppInfo.Version });
                 AppLog.Info($"Void Crew connected (bridge {hello.BridgeVersion}, game {hello.GameVersion}, {hello.Plugins?.Count ?? 0} plugins).");
                 Connected?.Invoke(hello);
 
@@ -147,38 +149,65 @@ public sealed class BridgeServer : IDisposable
         }
     }
 
+    /// <summary>A hello is good once: one copied off the wire can't be sent again.</summary>
+    private bool FirstUse(string nonce)
+    {
+        lock (_seenNonces)
+        {
+            if (_seenNonces.Count > 1000) _seenNonces.Clear();
+            return _seenNonces.Add(nonce);
+        }
+    }
+
+    /// <summary>
+    /// Handles one message from the game. A message the launcher can't read (wrong types, say) is logged and skipped, and
+    /// so is a handler that fails: neither drops the connection.
+    /// </summary>
     private void Dispatch(string line)
     {
-        JsonNode? node;
+        Action? raise;
         try
         {
-            node = JsonNode.Parse(line);
+            raise = ReadMessage(line);
         }
-        catch (JsonException)
+        catch (Exception e)
         {
-            AppLog.Warn("The bridge sent a line the launcher couldn't read.");
+            AppLog.Warn($"The bridge sent a message the launcher couldn't read ({e.Message}); skipped it.");
             return;
         }
-        string? type = node?["type"]?.GetValue<string>();
+        try
+        {
+            raise?.Invoke();
+        }
+        catch (Exception e)
+        {
+            AppLog.Error("Handling a message from the game failed", e);
+        }
+    }
+
+    /// <summary>Reads a message (keeping the newest state and rooms) and returns the event to raise for it, if any.</summary>
+    private Action? ReadMessage(string line)
+    {
+        JsonNode? node = JsonNode.Parse(line);
+        if (node is not JsonObject message || message["type"] is not JsonValue typeValue || !typeValue.TryGetValue(out string? type)) return null;
         switch (type)
         {
             case MessageTypes.State:
-                State = node.Deserialize<StateMessage>(JsonFiles.Protocol);
-                if (State != null) StateChanged?.Invoke(State);
-                break;
+                if (message.Deserialize<StateMessage>(JsonFiles.Protocol) is not { } state) return null;
+                State = state;
+                return () => StateChanged?.Invoke(state);
             case MessageTypes.Rooms:
-                Rooms = node.Deserialize<RoomsMessage>(JsonFiles.Protocol);
-                if (Rooms != null) RoomsChanged?.Invoke(Rooms);
-                break;
+                if (message.Deserialize<RoomsMessage>(JsonFiles.Protocol) is not { } rooms) return null;
+                Rooms = rooms;
+                return () => RoomsChanged?.Invoke(rooms);
             case MessageTypes.JoinResult:
-                if (node.Deserialize<JoinResultMessage>(JsonFiles.Protocol) is { } join) JoinResult?.Invoke(join);
-                break;
+                return message.Deserialize<JoinResultMessage>(JsonFiles.Protocol) is { } join ? () => JoinResult?.Invoke(join) : null;
             case MessageTypes.HostResult:
-                if (node.Deserialize<HostResultMessage>(JsonFiles.Protocol) is { } host) HostResult?.Invoke(host);
-                break;
+                return message.Deserialize<HostResultMessage>(JsonFiles.Protocol) is { } host ? () => HostResult?.Invoke(host) : null;
             case MessageTypes.Disconnected:
-                if (node.Deserialize<DisconnectedMessage>(JsonFiles.Protocol) is { } left) GameLeftRoom?.Invoke(left);
-                break;
+                return message.Deserialize<DisconnectedMessage>(JsonFiles.Protocol) is { } left ? () => GameLeftRoom?.Invoke(left) : null;
+            default:
+                return null;
         }
     }
 

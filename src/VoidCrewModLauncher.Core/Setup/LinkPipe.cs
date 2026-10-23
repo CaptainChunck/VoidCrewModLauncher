@@ -1,4 +1,5 @@
 using System.IO.Pipes;
+using System.Runtime.CompilerServices;
 using System.Text;
 
 namespace VoidCrewModLauncher.Core.Setup;
@@ -24,11 +25,12 @@ public sealed class LinkPipe : IDisposable
     {
         try
         {
-            await using var client = new NamedPipeClientStream(".", name ?? DefaultName, PipeDirection.Out, PipeOptions.Asynchronous);
-            await client.ConnectAsync(timeoutMs);
+            var client = new NamedPipeClientStream(".", name ?? DefaultName, PipeDirection.Out, PipeOptions.Asynchronous);
+            await using ConfiguredAsyncDisposable disposeClient = client.ConfigureAwait(false);
+            await client.ConnectAsync(timeoutMs).ConfigureAwait(false);
             byte[] bytes = Encoding.UTF8.GetBytes(link.Replace("\r", "").Replace("\n", "") + "\n");
-            await client.WriteAsync(bytes);
-            await client.FlushAsync();
+            await client.WriteAsync(bytes).ConfigureAwait(false);
+            await client.FlushAsync().ConfigureAwait(false);
             return true;
         }
         catch (Exception e) when (e is TimeoutException or IOException or UnauthorizedAccessException)
@@ -46,12 +48,13 @@ public sealed class LinkPipe : IDisposable
         {
             try
             {
-                await using var server = new NamedPipeServerStream(_name, PipeDirection.In, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-                await server.WaitForConnectionAsync(_stop.Token);
+                var server = new NamedPipeServerStream(_name, PipeDirection.In, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+                await using ConfiguredAsyncDisposable disposeServer = server.ConfigureAwait(false);
+                await server.WaitForConnectionAsync(_stop.Token).ConfigureAwait(false);
                 using var reader = new StreamReader(server, Encoding.UTF8);
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
                 timeout.CancelAfter(TimeSpan.FromSeconds(5));
-                string? line = await reader.ReadLineAsync(timeout.Token);
+                string? line = await reader.ReadLineAsync(timeout.Token).ConfigureAwait(false);
                 if (!string.IsNullOrWhiteSpace(line)) received(line.Trim());
             }
             catch (OperationCanceledException) when (_stop.IsCancellationRequested)
@@ -61,7 +64,7 @@ public sealed class LinkPipe : IDisposable
             catch (Exception e)
             {
                 AppLog.Warn($"Link pipe: {e.Message}");
-                await Task.Delay(500);
+                await Task.Delay(500).ConfigureAwait(false);
             }
         }
     }

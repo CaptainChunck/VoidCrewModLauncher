@@ -29,6 +29,14 @@ public static class VersionNumber
 
     public static bool Same(string? a, string? b) => Compare(a, b) == 0;
 
+    /// <summary>"1.2", "1.2.3" or "1.2.3.4" (a "v" in front is fine): what's worth looking up when another player names it.</summary>
+    public static bool IsValid(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text) || text.Length > 40) return false;
+        string[] parts = text.Trim().TrimStart('v', 'V').Split('.');
+        return parts.Length is >= 2 and <= 4 && parts.All(p => p.Length is > 0 and <= 9 && p.All(char.IsAsciiDigit));
+    }
+
     private static int[]? Parse(string? text)
     {
         if (string.IsNullOrWhiteSpace(text)) return null;
