@@ -1,4 +1,8 @@
-# Changelog
+﻿# Changelog
+
+## 0.7.1
+
+- Joining a lobby finds mods whose Void Crew listing Thunderstore left out of its list (it rejected Ship Customizer's), through the mod's GitHub page, instead of showing CAN'T GET.
 
 ## 0.7.0
 

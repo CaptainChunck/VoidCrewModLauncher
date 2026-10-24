@@ -158,9 +158,16 @@ public sealed class ThunderstoreClient : IDisposable
         return (await Task.WhenAll(lookups)).OfType<TsPackage>().ToList();
     }
 
-    private async Task<TsPackage?> GetCurrentAsync(string id, CancellationToken cancel)
+    /// <summary>
+    /// A package even when its Void Crew listing was rejected: only to find the mod's GitHub repo (its own releases),
+    /// never to download its Thunderstore files.
+    /// </summary>
+    public Task<TsPackage?> GetForGitHubAsync(string id, CancellationToken cancel = default) => GetCurrentAsync(id, cancel, true);
+
+    private async Task<TsPackage?> GetCurrentAsync(string id, CancellationToken cancel, bool includeRejected = false)
     {
-        if (_current.TryGetValue(id, out var cached) && DateTime.UtcNow - cached.At < CurrentAge) return cached.Package;
+        string key = includeRejected ? id + "|rejected" : id;
+        if (_current.TryGetValue(key, out var cached) && DateTime.UtcNow - cached.At < CurrentAge) return cached.Package;
         if (PackageReference.Parse(id) is not { } reference) return null;
         TsPackage? package = null;
         await _lookups.WaitAsync(cancel);
@@ -174,7 +181,7 @@ public sealed class ThunderstoreClient : IDisposable
             {
                 response.EnsureSuccessStatusCode();
                 await using Stream body = await response.Content.ReadAsStreamAsync(timeout.Token);
-                package = (await JsonSerializer.DeserializeAsync<CurrentPackage>(body, Json, timeout.Token))?.ToPackage();
+                package = (await JsonSerializer.DeserializeAsync<CurrentPackage>(body, Json, timeout.Token))?.ToPackage(includeRejected);
             }
         }
         catch (Exception e) when (e is not OperationCanceledException || !cancel.IsCancellationRequested)
@@ -186,7 +193,7 @@ public sealed class ThunderstoreClient : IDisposable
         {
             _lookups.Release();
         }
-        Remember<(DateTime At, TsPackage? Package)>(_current, id, (DateTime.UtcNow, package), a => DateTime.UtcNow - a.At < CurrentAge);
+        Remember<(DateTime At, TsPackage? Package)>(_current, key, (DateTime.UtcNow, package), a => DateTime.UtcNow - a.At < CurrentAge);
         return package;
     }
 
@@ -251,10 +258,11 @@ public sealed class ThunderstoreClient : IDisposable
         public List<CommunityListing> CommunityListings { get; set; } = new();
 
         /// <summary>As a list entry, when it is listed (and not rejected) in the Void Crew community.</summary>
-        public TsPackage? ToPackage()
+        public TsPackage? ToPackage(bool includeRejected = false)
         {
             CommunityListing? listing = CommunityListings.FirstOrDefault(l => string.Equals(l.Community, AppInfo.ThunderstoreCommunity, StringComparison.OrdinalIgnoreCase));
-            if (Latest == null || listing == null || string.Equals(listing.ReviewStatus, "rejected", StringComparison.OrdinalIgnoreCase)) return null;
+            if (Latest == null || listing == null) return null;
+            if (!includeRejected && string.Equals(listing.ReviewStatus, "rejected", StringComparison.OrdinalIgnoreCase)) return null;
             string owner = Owner.Length > 0 ? Owner : Namespace;
             return new TsPackage
             {

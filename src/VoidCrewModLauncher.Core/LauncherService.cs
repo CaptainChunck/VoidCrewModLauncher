@@ -250,7 +250,14 @@ public sealed class LauncherService : IDisposable
         {
             TsVersion? exact = await Thunderstore.GetVersionAsync(mod.PackageId!, mod.Version, cancel);
             TsPackage? package = mod.Package ?? Index.Find(mod.PackageId) ?? (await Thunderstore.GetCurrentAsync(new[] { mod.PackageId! }, cancel)).FirstOrDefault();
-            if (package == null) return null;
+            if (package == null)
+            {
+                // Not listed for Void Crew (Thunderstore rejected the listing): its GitHub release can still be used,
+                // never Thunderstore's files.
+                package = await Thunderstore.GetForGitHubAsync(mod.PackageId!, cancel);
+                if (package == null) return null;
+                exact = null;
+            }
             // A host who got a newer version from the mod's GitHub releases: the same release.
             if (exact == null && Settings.GitHubUpdates && GitHubRepo.Parse(package.LatestOnThunderstore?.WebsiteUrl) is { } repo)
             {
