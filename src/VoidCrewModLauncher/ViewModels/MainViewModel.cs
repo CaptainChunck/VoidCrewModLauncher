@@ -231,6 +231,31 @@ public partial class MainViewModel : ObservableObject
         return _gameProcess != null;
     }
 
+    private DateTime? _checkedLaunch;
+
+    /// <summary>
+    /// The game the launcher started runs but never connected: writes what the launcher can see about why to its log
+    /// (once per launch, off the UI thread), so a player can send it.
+    /// </summary>
+    private void CheckLaunch(DateTime launch)
+    {
+        _checkedLaunch = launch;
+        SetStatus("Void Crew started without the launcher's mods. Details are in the launcher log (SETTINGS, LAUNCHER LOG).");
+        string? game = Service.GameDirectory;
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                AppLog.Warn("Void Crew runs but never connected to the launcher. What the launcher sees:");
+                foreach (string line in LaunchCheck.Run(Service.Paths, game, launch)) AppLog.Warn("  " + line);
+            }
+            catch (Exception e)
+            {
+                AppLog.Error("The launch check failed", e);
+            }
+        });
+    }
+
     public void UpdateGameState()
     {
         bool running = IsGameRunning();
@@ -241,7 +266,11 @@ public partial class MainViewModel : ObservableObject
         GameState next;
         // Steam may need a while to start (and log in) before the game's process appears.
         if (!running) next = waitingForProcess ? GameState.Starting : GameState.NotRunning;
-        else if (!Service.Bridge.IsConnected) next = recentlyLaunched ? GameState.Starting : GameState.RunningOutside;
+        else if (!Service.Bridge.IsConnected)
+        {
+            next = recentlyLaunched ? GameState.Starting : GameState.RunningOutside;
+            if (next == GameState.RunningOutside && Service.LastLaunchUtc is { } launch && _checkedLaunch != launch && _seenLaunch == launch) CheckLaunch(launch);
+        }
         else
         {
             next = state?.Phase switch

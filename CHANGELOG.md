@@ -1,5 +1,9 @@
 ﻿# Changelog
 
+## 0.7.3
+
+- When Void Crew runs after a launch but never connects, the launcher writes what it can see about why to its log (the command line the game got, the loader in the game folder, whether BepInEx ran), and says so in the status bar.
+
 ## 0.7.2
 
 - Fixed: with a space in your Windows user name, Void Crew started without mods and the launcher never saw it (no lobbies). Steam drops the quotes around paths it passes to the game, so the launcher now gives it the short form of the path, or starts the game directly with the path in quotes.
