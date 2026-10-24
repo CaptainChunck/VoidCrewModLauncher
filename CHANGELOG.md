@@ -1,5 +1,9 @@
 ﻿# Changelog
 
+## 0.7.2
+
+- Fixed: with a space in your Windows user name, Void Crew started without mods and the launcher never saw it (no lobbies). Steam drops the quotes around paths it passes to the game, so the launcher now gives it the short form of the path, or starts the game directly with the path in quotes.
+
 ## 0.7.1
 
 - Joining a lobby finds mods whose Void Crew listing Thunderstore left out of its list (it rejected Ship Customizer's), through the mod's GitHub page, instead of showing CAN'T GET.

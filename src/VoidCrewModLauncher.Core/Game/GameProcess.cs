@@ -27,8 +27,14 @@ public static class GameProcess
     /// </summary>
     public static void Start(string gameDirectory, string preloader, bool throughSteam)
     {
-        string[] arguments = Doorstop.Arguments(preloader);
         string? steam = throughSteam ? SteamLocator.SteamExe() : null;
+        (preloader, bool keepSteam) = PathForSteam(preloader, steam != null, ShortPath);
+        if (steam != null && !keepSteam)
+        {
+            AppLog.Info("The launcher's folder has a space in its path and no short name, which Steam would cut in two; starting the game directly.");
+            steam = null;
+        }
+        string[] arguments = Doorstop.Arguments(preloader);
         ProcessStartInfo start;
         if (steam != null)
         {
@@ -49,6 +55,25 @@ public static class GameProcess
         foreach (string argument in arguments) start.ArgumentList.Add(argument);
         AppLog.Info($"Starting Void Crew {(steam != null ? "through Steam" : "directly")}: {string.Join(' ', arguments)}");
         using Process? process = Process.Start(start);
+    }
+
+    /// <summary>
+    /// Steam passes the arguments on to the game without their quotes, so a path with a space (a Windows user name like
+    /// "Jo Smith") arrives cut in two and BepInEx never loads. Then the path's short form (C:\Users\JOSMIT~1\...) is
+    /// used; where the drive has no short names, the game is started directly instead, which keeps the quotes.
+    /// </summary>
+    internal static (string Path, bool ThroughSteam) PathForSteam(string preloader, bool throughSteam, Func<string, string?> shortPath)
+    {
+        if (!throughSteam || !preloader.Contains(' ')) return (preloader, throughSteam);
+        string? shortForm = shortPath(preloader);
+        return shortForm != null && !shortForm.Contains(' ') ? (shortForm, true) : (preloader, false);
+    }
+
+    internal static string? ShortPath(string path)
+    {
+        var buffer = new char[1024];
+        uint length = GetShortPathNameW(path, buffer, (uint)buffer.Length);
+        return length == 0 || length > buffer.Length ? null : new string(buffer, 0, (int)length);
     }
 
     /// <summary>Asks the game to close as if its window were closed. False if it isn't running.</summary>
@@ -108,4 +133,7 @@ public static class GameProcess
 
     [DllImport("user32.dll")]
     private static extern bool IsIconic(IntPtr window);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    private static extern uint GetShortPathNameW(string longPath, char[] shortPath, uint bufferLength);
 }
