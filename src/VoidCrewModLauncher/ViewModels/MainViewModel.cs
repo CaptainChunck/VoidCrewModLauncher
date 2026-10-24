@@ -417,8 +417,7 @@ public partial class MainViewModel : ObservableObject
                 Service.Settings.DoorstopConsent = true;
                 Service.SaveSettings();
                 await work();
-            }
-            if (StatusText == what + "...") SetStatus("Done.");
+            }            if (StatusText == what + "...") SetStatus("Done.");
             return true;
         }
         catch (OperationCanceledException)

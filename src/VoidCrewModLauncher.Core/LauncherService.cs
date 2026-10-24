@@ -31,7 +31,6 @@ public sealed class DoorstopConsentNeededException(string gameDirectory)
 {
     public string GameDirectory { get; } = gameDirectory;
 }
-
 /// <summary>
 /// Everything the launcher does, for the UI to call: the mod library and Thunderstore, building and starting launches,
 /// and the bridge to the running game. UI-free and long-lived; events may come from background threads.
@@ -508,6 +507,12 @@ public sealed class LauncherService : IDisposable
         {
             if (!Settings.DoorstopConsent) throw new DoorstopConsentNeededException(game);
             Doorstop.InstallIfMissing(game, bepInExPack);
+        }
+        else if (doorstop.Outdated)
+        {
+            // An old Doorstop (3.x) from a manual BepInEx install never loads the launcher's BepInEx: the game would start
+            // without mods. Its files are kept next to the new ones.
+            Doorstop.ReplaceOutdated(game, bepInExPack);
         }
 
         var launch = new LaunchFile

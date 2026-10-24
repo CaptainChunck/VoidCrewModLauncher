@@ -13,6 +13,12 @@ public sealed record DoorstopState(bool HasLoader, string? Version, bool? Enable
         if (InstalledByLauncher) return $"Installed by the launcher (Doorstop {Version ?? "?"}).";
         return $"From another mod manager (Doorstop {Version ?? "?"}). Left as it is.";
     }
+
+    /// <summary>
+    /// Another install's Doorstop older than 4: it doesn't load the launcher's BepInEx (it keeps to its own config), so
+    /// the game starts without the launcher's mods until it is replaced.
+    /// </summary>
+    public bool Outdated => HasLoader && !InstalledByLauncher && System.Version.TryParse(Version, out System.Version? parsed) && parsed.Major < 4;
 }
 
 /// <summary>
@@ -185,6 +191,25 @@ public static class Doorstop
             }
         }
         AppLog.Info($"Added BepInEx's loader (Doorstop) to {gameDirectory}, off for normal launches.");
+    }
+
+    /// <summary>The name an outdated loader's files are kept under when the launcher's replaces them.</summary>
+    public const string OldLoaderSuffix = ".old-doorstop";
+
+    /// <summary>
+    /// Puts the launcher's Doorstop in place of another install's outdated one (see <see cref="DoorstopState.Outdated"/>).
+    /// The old files are kept next to it, renamed with <see cref="OldLoaderSuffix"/>.
+    /// </summary>
+    public static void ReplaceOutdated(string gameDirectory, string bepInExPackDirectory)
+    {
+        if (!Inspect(gameDirectory).Outdated) return;
+        foreach (string name in new[] { ProxyFile, ConfigFile, VersionFile })
+        {
+            string path = Path.Combine(gameDirectory, name);
+            if (File.Exists(path)) File.Move(path, path + OldLoaderSuffix, true);
+        }
+        AppLog.Info($"Moved the outdated Doorstop in {gameDirectory} aside ({OldLoaderSuffix}).");
+        InstallIfMissing(gameDirectory, bepInExPackDirectory);
     }
 
     /// <summary>

@@ -1,5 +1,9 @@
 ﻿# Changelog
 
+## 0.7.4
+
+- **Fixed: the game started without mods when its folder had an old BepInEx loader** (Doorstop 3, from a manual BepInEx install). The launcher now puts its own loader in its place by itself when you start the game; the old files are kept next to it with .old-doorstop on the end.
+
 ## 0.7.3
 
 - When Void Crew runs after a launch but never connects, the launcher writes what it can see about why to its log (the command line the game got, the loader in the game folder, whether BepInEx ran), and says so in the status bar.
