@@ -40,6 +40,9 @@ public sealed class LauncherSettings
 
     public DateTime? UpdateTriedUtc { get; set; }
 
+    /// <summary>The launcher's language (a code from Loc.Languages); null for the Windows language.</summary>
+    public string? Language { get; set; }
+
     public HostSettings Host { get; set; } = new();
 
     public BrowserSettings Browser { get; set; } = new();
@@ -60,6 +63,29 @@ public sealed class LauncherSettings
     }
 
     public void Save(AppPaths paths) => JsonFiles.Save(paths.SettingsFile, this);
+
+    /// <summary>
+    /// Only the language from settings.json, for start-up before anything else is read (or logged): null when there is
+    /// no file, no language, or the file can't be read.
+    /// </summary>
+    public static string? ReadLanguage(AppPaths paths)
+    {
+        try
+        {
+            if (!File.Exists(paths.SettingsFile)) return null;
+            using FileStream stream = new(paths.SettingsFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var document = System.Text.Json.JsonDocument.Parse(stream);
+            return document.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object
+                   && document.RootElement.TryGetProperty("language", out var language)
+                   && language.ValueKind == System.Text.Json.JsonValueKind.String
+                ? language.GetString()
+                : null;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
 }
 
 public sealed class HostSettings

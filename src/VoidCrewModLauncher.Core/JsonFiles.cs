@@ -57,7 +57,7 @@ public static class JsonFiles
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
-                if (attempt >= attempts) throw new IOException($"Could not open {path}: {e.Message}", e);
+                if (attempt >= attempts) throw new IOException(Loc.F("Could not open {0}: {1}", path, e.Message), e);
                 Thread.Sleep(wait);
             }
         }

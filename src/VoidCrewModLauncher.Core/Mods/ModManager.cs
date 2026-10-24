@@ -82,18 +82,18 @@ public sealed class ModManager
     /// <summary>Installs a Thunderstore mod (the latest version unless one is given) with its dependencies, and turns it on.</summary>
     public async Task<InstalledMod> InstallAsync(string id, string? version = null, IProgress<InstallStatus>? status = null, CancellationToken cancel = default)
     {
-        TsPackage package = Index.Find(id) ?? throw new InvalidOperationException($"{id} isn't on Thunderstore's Void Crew list.");
+        TsPackage package = Index.Find(id) ?? throw new InvalidOperationException(Loc.F("{0} isn't on Thunderstore's Void Crew list.", id));
         TsVersion chosen = (version != null ? package.Version(version) : null) ?? Newest(package)
-            ?? throw new InvalidOperationException($"{package.FullName} has no versions.");
+            ?? throw new InvalidOperationException(Loc.F("{0} has no versions.", package.FullName));
 
         List<(TsPackage Package, TsVersion Version)> plan = Resolve(new[] { (package, chosen) });
         int step = 0;
         foreach ((TsPackage item, TsVersion planned) in plan)
         {
             step++;
-            string label = $"{item.DisplayName} {planned.VersionNumber}";
-            status?.Report(new InstallStatus($"Downloading {label} ({step}/{plan.Count})", 0));
-            var progress = new Progress<double>(f => status?.Report(new InstallStatus($"Downloading {label} ({step}/{plan.Count})", f)));
+            string text = Loc.F("Downloading {0} {1} ({2}/{3})", item.DisplayName, planned.VersionNumber, step, plan.Count);
+            status?.Report(new InstallStatus(text, 0));
+            var progress = new Progress<double>(f => status?.Report(new InstallStatus(text, f)));
             (string folder, TsVersion itemVersion) = await EnsureAsync(item, planned, progress, cancel);
             if (ReferenceEquals(item, package)) chosen = itemVersion;
 
@@ -115,7 +115,7 @@ public sealed class ModManager
             _library.AddOrReplace(mod);
             AppLog.Info($"Installed {mod.Id} {mod.Version}{(mod.InstalledAsDependency ? " (dependency)" : "")}.");
         }
-        status?.Report(new InstallStatus($"Installed {package.DisplayName} {chosen.VersionNumber}."));
+        status?.Report(new InstallStatus(Loc.F("Installed {0} {1}.", package.DisplayName, chosen.VersionNumber)));
         return _library.Find(package.FullName)!;
     }
 
@@ -271,10 +271,10 @@ public sealed class ModManager
         string? newest = _store.Versions(PackageIndex.BepInExPackId).OrderByDescending(v => v, VersionNumber.Comparer).FirstOrDefault();
         if (latest != null)
         {
-            if (!_store.Has(PackageIndex.BepInExPackId, latest.VersionNumber)) status?.Report(new InstallStatus($"Downloading BepInEx {latest.VersionNumber}", 0));
+            if (!_store.Has(PackageIndex.BepInExPackId, latest.VersionNumber)) status?.Report(new InstallStatus(Loc.F("Downloading BepInEx {0}", latest.VersionNumber), 0));
             try
             {
-                return await _store.EnsureAsync(latest, new Progress<double>(f => status?.Report(new InstallStatus($"Downloading BepInEx {latest.VersionNumber}", f))), cancel);
+                return await _store.EnsureAsync(latest, new Progress<double>(f => status?.Report(new InstallStatus(Loc.F("Downloading BepInEx {0}", latest.VersionNumber), f))), cancel);
             }
             catch (Exception e) when (newest != null && !cancel.IsCancellationRequested)
             {
@@ -283,6 +283,6 @@ public sealed class ModManager
             }
         }
         if (newest != null) return _store.VersionDirectory(PackageIndex.BepInExPackId, newest);
-        throw new InvalidOperationException("BepInEx isn't downloaded yet and Thunderstore can't be reached. Connect to the internet and try again.");
+        throw new InvalidOperationException(Loc.T("BepInEx isn't downloaded yet and Thunderstore can't be reached. Connect to the internet and try again."));
     }
 }

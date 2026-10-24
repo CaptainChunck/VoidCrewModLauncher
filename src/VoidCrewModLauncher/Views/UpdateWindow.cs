@@ -20,17 +20,17 @@ public sealed class UpdateWindow : Window
         var body = new StackPanel { Width = 460 };
         body.Children.Add(new TextBlock
         {
-            Text = $"{AppInfo.Name} {release.Version} is out. The launcher is downloading it now and opens again once it's installed.",
+            Text = Loc.F("{0} {1} is out. The launcher is downloading it now and opens again once it's installed.", AppInfo.Name, release.Version),
             Style = (Style)Application.Current.Resources["Body"],
             TextWrapping = TextWrapping.Wrap,
         });
         _bar = new ProgressBar { Maximum = 1, Height = 8, Margin = new Thickness(0, 18, 0, 0) };
         body.Children.Add(_bar);
-        _progress = new TextBlock { Style = (Style)Application.Current.Resources["Muted"], Margin = new Thickness(0, 6, 0, 0), Text = "Starting the download..." };
+        _progress = new TextBlock { Style = (Style)Application.Current.Resources["Muted"], Margin = new Thickness(0, 6, 0, 0), Text = Loc.T("Starting the download...") };
         body.Children.Add(_progress);
 
-        Dialogs.Decorate(this, "Updating", body, out StackPanel buttons);
-        Button cancel = Dialogs.MakeButton("CANCEL", ButtonKind.Normal);
+        Dialogs.Decorate(this, Loc.T("Updating"), body, out StackPanel buttons);
+        Button cancel = Dialogs.MakeButton(Loc.T("CANCEL"), ButtonKind.Normal);
         cancel.IsCancel = true;
         cancel.Click += (_, _) => Close();
         buttons.Children.Add(cancel);
@@ -54,7 +54,7 @@ public sealed class UpdateWindow : Window
             {
                 var progress = new Progress<(long Done, long Total)>(p => window.Report(p.Done, p.Total));
                 string file = await updater.DownloadAsync(release, progress, window._cancel.Token);
-                window._progress.Text = "Checking the download...";
+                window._progress.Text = Loc.T("Checking the download...");
                 await Task.Run(() => Updater.CheckSetup(file, release.Version));
                 setup = file;
             }
@@ -73,6 +73,6 @@ public sealed class UpdateWindow : Window
     private void Report(long done, long total)
     {
         _bar.Value = total > 0 ? Math.Min(1.0, done / (double)total) : 0;
-        _progress.Text = total > 0 ? $"{Format.Bytes(done)} of {Format.Bytes(total)}" : Format.Bytes(done);
+        _progress.Text = total > 0 ? Loc.F("{0} of {1}", Format.Bytes(done), Format.Bytes(total)) : Format.Bytes(done);
     }
 }

@@ -26,34 +26,34 @@ public sealed class JoinWindow : Window
         _resolve = resolve;
         _needsRestart = needsRestart;
         _running = running;
-        _join = Dialogs.MakeButton("JOIN", ButtonKind.Primary);
+        _join = Dialogs.MakeButton(Loc.T("JOIN"), ButtonKind.Primary);
         var body = new StackPanel { Width = 600 };
 
         body.Children.Add(Text($"{plan.Lobby.Name}", 17, Brushes.White, FontWeights.SemiBold));
-        body.Children.Add(Text($"hosted by {plan.Lobby.Room.Host} · {plan.Lobby.Room.Players}/{plan.Lobby.Room.MaxPlayers} crew", 13, Brush("TextMuted")));
+        body.Children.Add(Text(Loc.F("hosted by {0} · {1}/{2} crew", plan.Lobby.Room.Host, plan.Lobby.Room.Players, plan.Lobby.Room.MaxPlayers), 13, Brush("TextMuted")));
 
         var needed = plan.Lines.Where(l => l.Mod.JoinerNeeds).ToList();
         var notNeeded = plan.Lines.Where(l => !l.Mod.JoinerNeeds).ToList();
         if (needed.Count > 0)
         {
-            body.Children.Add(Heading("THIS LOBBY NEEDS"));
+            body.Children.Add(Heading(Loc.T("THIS LOBBY NEEDS")));
             foreach (JoinPlanLine line in needed) body.Children.Add(LineRow(line));
         }
         else
         {
-            body.Children.Add(Heading("MODS"));
-            body.Children.Add(Text(plan.Lobby.ModsUnknown ? "The lobby doesn't list its mods." : "None.", 13, Brush("TextSecondary")));
+            body.Children.Add(Heading(Loc.T("MODS")));
+            body.Children.Add(Text(plan.Lobby.ModsUnknown ? Loc.T("The lobby doesn't list its mods.") : Loc.T("None."), 13, Brush("TextSecondary")));
         }
         if (notNeeded.Count > 0)
         {
-            body.Children.Add(Text("Host only: " + string.Join(", ", notNeeded.Select(l => l.Mod.DisplayName)), 12.5, Brush("TextMuted"), margin: new Thickness(0, 8, 0, 0)));
+            body.Children.Add(Text(Loc.F("Host only: {0}", string.Join(", ", notNeeded.Select(l => l.Mod.DisplayName))), 12.5, Brush("TextMuted"), margin: new Thickness(0, 8, 0, 0)));
         }
 
-        body.Children.Add(Heading("YOUR MODS FOR THIS GAME"));
-        body.Children.Add(Text(plan.Kept.Count == 0 ? "Stay on: none" : "Stay on: " + string.Join(", ", plan.Kept.Select(m => m.DisplayName)), 13, Brush("TextSecondary")));
+        body.Children.Add(Heading(Loc.T("YOUR MODS FOR THIS GAME")));
+        body.Children.Add(Text(plan.Kept.Count == 0 ? Loc.T("Stay on: none") : Loc.F("Stay on: {0}", string.Join(", ", plan.Kept.Select(m => m.DisplayName))), 13, Brush("TextSecondary")));
         if (plan.TurnedOff.Count > 0)
         {
-            body.Children.Add(Text("Off for this game: " + string.Join(", ", plan.TurnedOff.Select(m => m.DisplayName)), 13, Brush("TextMuted"), margin: new Thickness(0, 4, 0, 0)));
+            body.Children.Add(Text(Loc.F("Off for this game: {0}", string.Join(", ", plan.TurnedOff.Select(m => m.DisplayName))), 13, Brush("TextMuted"), margin: new Thickness(0, 4, 0, 0)));
         }
         foreach (string warning in plan.Warnings)
         {
@@ -64,10 +64,10 @@ public sealed class JoinWindow : Window
         body.Children.Add(_summary);
         UpdateSummary();
 
-        Dialogs.Decorate(this, "Join lobby", new ScrollViewer { Content = body, MaxHeight = 560, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }, out StackPanel buttons);
+        Dialogs.Decorate(this, Loc.T("Join lobby"), new ScrollViewer { Content = body, MaxHeight = 560, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }, out StackPanel buttons);
         _join.IsDefault = true;
         _join.Click += (_, _) => DialogResult = true;
-        Button cancel = Dialogs.MakeButton("CANCEL", ButtonKind.Normal);
+        Button cancel = Dialogs.MakeButton(Loc.T("CANCEL"), ButtonKind.Normal);
         cancel.IsCancel = true;
         buttons.Children.Add(_join);
         buttons.Children.Add(cancel);
@@ -94,7 +94,7 @@ public sealed class JoinWindow : Window
         var name = new StackPanel { Margin = new Thickness(6, 7, 8, 7) };
         string version = line.Version?.VersionNumber ?? line.Mod.Version;
         name.Children.Add(Text($"{line.Mod.DisplayName}  v{version}", 14, Brushes.White, FontWeights.SemiBold));
-        string by = line.Mod.Package != null ? "by " + line.Mod.Package.Author : line.Mod.Local ? "the host's own mod" : "not on Thunderstore";
+        string by = line.Mod.Package != null ? Loc.F("by {0}", line.Mod.Package.Author) : line.Mod.Local ? Loc.T("the host's own mod") : Loc.T("not on Thunderstore");
         name.Children.Add(Text(by, 12, Brush("TextMuted")));
         if (line.Note != null) name.Children.Add(Text(line.Note, 12, Brush("Orange")));
         Grid.SetColumn(name, 1);
@@ -102,10 +102,10 @@ public sealed class JoinWindow : Window
 
         (string text, string color) = line.Status switch
         {
-            LobbyModStatus.Ready => ("INSTALLED", "Green"),
-            LobbyModStatus.Download => ("DOWNLOAD", "LightBlue"),
-            LobbyModStatus.Unavailable => ("CAN'T GET", "Red"),
-            _ => ("NOT NEEDED", "LightGrey"),
+            LobbyModStatus.Ready => (Loc.T("INSTALLED"), "Green"),
+            LobbyModStatus.Download => (Loc.T("DOWNLOAD"), "LightBlue"),
+            LobbyModStatus.Unavailable => (Loc.T("CAN'T GET"), "Red"),
+            _ => (Loc.T("NOT NEEDED"), "LightGrey"),
         };
         var badge = new Border
         {
@@ -123,14 +123,14 @@ public sealed class JoinWindow : Window
     {
         ResolvedJoin join = _resolve(_plan);
         bool restart = _running && _needsRestart(join);
-        string downloads = join.Downloads.Count == 0
-            ? ""
-            : $"Downloads {join.Downloads.Count} mod{(join.Downloads.Count == 1 ? "" : "s")} ({Format.Bytes(join.DownloadBytes)}). ";
-        string game = !_running ? "Starts Void Crew and joins."
-            : restart ? "Restarts Void Crew and joins."
-            : "Joins right away.";
+        string downloads = join.Downloads.Count == 0 ? ""
+            : join.Downloads.Count == 1 ? Loc.F("Downloads {0} mod ({1}).", join.Downloads.Count, Format.Bytes(join.DownloadBytes)) + " "
+            : Loc.F("Downloads {0} mods ({1}).", join.Downloads.Count, Format.Bytes(join.DownloadBytes)) + " ";
+        string game = !_running ? Loc.T("Starts Void Crew and joins.")
+            : restart ? Loc.T("Restarts Void Crew and joins.")
+            : Loc.T("Joins right away.");
         _summary.Text = downloads + game;
-        _join.Content = restart ? "RESTART AND JOIN" : "JOIN";
+        _join.Content = restart ? Loc.T("RESTART AND JOIN") : Loc.T("JOIN");
     }
 
     private static TextBlock Heading(string text) => new()

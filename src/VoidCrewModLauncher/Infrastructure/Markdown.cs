@@ -31,7 +31,7 @@ public static partial class Markdown
         if (string.IsNullOrWhiteSpace(markdown))
         {
             FlowDocument empty = NewDocument();
-            empty.Blocks.Add(new Paragraph(new Run("This mod has no README.")) { Foreground = Brushes.Gray });
+            empty.Blocks.Add(new Paragraph(new Run(Loc.T("This mod has no README."))) { Foreground = Brushes.Gray });
             return empty;
         }
         if (markdown.Length > MaxLength) markdown = markdown[..MaxLength];

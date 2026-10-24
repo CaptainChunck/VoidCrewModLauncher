@@ -1,6 +1,7 @@
 <UserControl x:Class="VoidCrewModLauncher.Views.ModsView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:i="clr-namespace:VoidCrewModLauncher.Infrastructure"
              xmlns:c="clr-namespace:VoidCrewModLauncher.Controls">
     <UserControl.Resources>
         <!-- A package icon with the first letter behind it while it loads (or when it has none). -->
@@ -26,24 +27,31 @@
         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,14">
             <RadioButton Style="{StaticResource SubTab}" GroupName="ModsTab" IsChecked="{Binding ShowBrowse, Converter={StaticResource Not}}">
                 <TextBlock>
-                    <Run Text="INSTALLED" /> <Run Text="{Binding InstalledCount, Mode=OneWay}" Foreground="{StaticResource TextMuted}" />
+                    <Run Text="{i:T INSTALLED}" /> <Run Text="{Binding InstalledCount, Mode=OneWay}" Foreground="{StaticResource TextMuted}" />
                 </TextBlock>
             </RadioButton>
-            <RadioButton Style="{StaticResource SubTab}" GroupName="ModsTab" Content="MODS" IsChecked="{Binding ShowBrowse}" />
+            <RadioButton Style="{StaticResource SubTab}" GroupName="ModsTab" Content="{i:T MODS}" IsChecked="{Binding ShowBrowse}" />
         </StackPanel>
 
         <Grid>
             <!-- ======================================================== INSTALLED -->
             <DockPanel Visibility="{Binding ShowBrowse, Converter={StaticResource Hide}}">
                 <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10" LastChildFill="False">
-                    <TextBox DockPanel.Dock="Left" Width="300" Text="{Binding InstalledSearch, UpdateSourceTrigger=PropertyChanged}" Tag="Search your mods" />
+                    <TextBox DockPanel.Dock="Left" Width="300" Text="{Binding InstalledSearch, UpdateSourceTrigger=PropertyChanged}" Tag="{i:T Search your mods}" />
                     <Button DockPanel.Dock="Right" Style="{StaticResource PrimaryButton}" Content="{Binding UpdateAllText}" Command="{Binding UpdateAllCommand}" Margin="8,0,0,0"
                             Visibility="{Binding UpdateCount, Converter={StaticResource Show}}" />
-                    <Button DockPanel.Dock="Right" Style="{StaticResource HexButton}" Content="IMPORT FROM BEPINEX" Command="{Binding ImportCommand}" Margin="8,0,0,0" />
-                    <Button DockPanel.Dock="Right" Style="{StaticResource HexButton}" Content="ADD MOD FILE" Command="{Binding AddLocalCommand}" />
+                    <Button DockPanel.Dock="Right" Style="{StaticResource HexButton}" Content="{i:T IMPORT FROM BEPINEX}" Command="{Binding ImportCommand}" Margin="8,0,0,0" />
+                    <Button DockPanel.Dock="Right" Style="{StaticResource HexButton}" Content="{i:T ADD MOD FILE}" Command="{Binding AddLocalCommand}" />
                 </DockPanel>
                 <TextBlock DockPanel.Dock="Top" Style="{StaticResource Muted}" Margin="2,0,0,8">
-                    <Run Text="{Binding EnabledCount, Mode=OneWay}" /> <Run Text="of" /> <Run Text="{Binding InstalledCount, Mode=OneWay}" /> <Run Text="on  ·" />
+                    <Run>
+                        <Run.Text>
+                            <MultiBinding StringFormat="{i:T '\{0\} of \{1\} on'}" Mode="OneWay">
+                                <Binding Path="EnabledCount" />
+                                <Binding Path="InstalledCount" />
+                            </MultiBinding>
+                        </Run.Text>
+                    </Run> <Run Text=" ·" />
                     <Run Text="{Binding BepInExText, Mode=OneWay}" />
                 </TextBlock>
 
@@ -65,13 +73,13 @@
                                             <TextBlock Text="{Binding Name}" FontSize="16" FontWeight="Bold" Foreground="White" />
                                             <TextBlock Text="{Binding Version}" FontSize="12.5" Foreground="{StaticResource TextMuted}" Margin="8,0,0,0" VerticalAlignment="Center" />
                                             <Border Style="{StaticResource Badge}" BorderBrush="{StaticResource LightBlue}" Margin="10,0,0,0" Visibility="{Binding IsLocal, Converter={StaticResource Show}}">
-                                                <TextBlock Text="LOCAL" Style="{StaticResource BadgeText}" Foreground="{StaticResource LightBlue}" />
+                                                <TextBlock Text="{i:T LOCAL}" Style="{StaticResource BadgeText}" Foreground="{StaticResource LightBlue}" />
                                             </Border>
                                             <Border Style="{StaticResource Badge}" BorderBrush="{StaticResource LightBlue}" Margin="10,0,0,0" Visibility="{Binding FromGitHub, Converter={StaticResource Show}}">
                                                 <TextBlock Text="GITHUB" Style="{StaticResource BadgeText}" Foreground="{StaticResource LightBlue}" />
                                             </Border>
                                             <Border Style="{StaticResource Badge}" BorderBrush="{StaticResource LightGrey}" Margin="10,0,0,0" Visibility="{Binding IsDependency, Converter={StaticResource Show}}">
-                                                <TextBlock Text="DEPENDENCY" Style="{StaticResource BadgeText}" Foreground="{StaticResource TextSecondary}" />
+                                                <TextBlock Text="{i:T DEPENDENCY}" Style="{StaticResource BadgeText}" Foreground="{StaticResource TextSecondary}" />
                                             </Border>
                                         </StackPanel>
                                         <TextBlock Text="{Binding Author}" FontSize="12" Foreground="{StaticResource TextMuted}" />
@@ -83,11 +91,11 @@
                                             Visibility="{Binding HasUpdate, Converter={StaticResource Show}}" />
                                     <CheckBox Grid.Column="3" Style="{StaticResource Switch}" IsChecked="{Binding IsEnabled}" VerticalAlignment="Center" />
                                     <Button Grid.Column="4" Style="{StaticResource LinkButton}" Content="&#x2022;&#x2022;&#x2022;" FontSize="16" Margin="10,0,0,0" VerticalAlignment="Center"
-                                            Click="MoreButton_Click" ToolTip="More">
+                                            Click="MoreButton_Click" ToolTip="{i:T More}">
                                         <Button.ContextMenu>
                                             <ContextMenu>
-                                                <MenuItem Header="When joining other lobbies">
-                                                    <MenuItem Header="Decide for me (keep client-side mods)" IsCheckable="False" IsChecked="{Binding JoinAuto, Mode=OneWay}"
+                                                <MenuItem Header="{i:T When joining other lobbies}">
+                                                    <MenuItem Header="{i:T Decide for me (keep client-side mods)}" IsCheckable="False" IsChecked="{Binding JoinAuto, Mode=OneWay}"
                                                               Command="{Binding PlacementTarget.Tag.SetJoinBehaviourCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}">
                                                         <MenuItem.CommandParameter>
                                                             <MultiBinding Converter="{StaticResource Pack}">
@@ -96,7 +104,7 @@
                                                             </MultiBinding>
                                                         </MenuItem.CommandParameter>
                                                     </MenuItem>
-                                                    <MenuItem Header="Always keep it on" IsChecked="{Binding JoinKeep, Mode=OneWay}"
+                                                    <MenuItem Header="{i:T Always keep it on}" IsChecked="{Binding JoinKeep, Mode=OneWay}"
                                                               Command="{Binding PlacementTarget.Tag.SetJoinBehaviourCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}">
                                                         <MenuItem.CommandParameter>
                                                             <MultiBinding Converter="{StaticResource Pack}">
@@ -105,7 +113,7 @@
                                                             </MultiBinding>
                                                         </MenuItem.CommandParameter>
                                                     </MenuItem>
-                                                    <MenuItem Header="Only when the lobby runs it" IsChecked="{Binding JoinOnlyIfLobby, Mode=OneWay}"
+                                                    <MenuItem Header="{i:T Only when the lobby runs it}" IsChecked="{Binding JoinOnlyIfLobby, Mode=OneWay}"
                                                               Command="{Binding PlacementTarget.Tag.SetJoinBehaviourCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}">
                                                         <MenuItem.CommandParameter>
                                                             <MultiBinding Converter="{StaticResource Pack}">
@@ -116,10 +124,10 @@
                                                     </MenuItem>
                                                 </MenuItem>
                                                 <Separator />
-                                                <MenuItem Header="Open its folder" Command="{Binding PlacementTarget.Tag.OpenModFolderCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
-                                                <MenuItem Header="View on Thunderstore" Command="{Binding PlacementTarget.Tag.OpenModPageCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
+                                                <MenuItem Header="{i:T Open its folder}" Command="{Binding PlacementTarget.Tag.OpenModFolderCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
+                                                <MenuItem Header="{i:T View on Thunderstore}" Command="{Binding PlacementTarget.Tag.OpenModPageCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
                                                 <Separator />
-                                                <MenuItem Header="Remove" Command="{Binding PlacementTarget.Tag.UninstallCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
+                                                <MenuItem Header="{i:T Remove}" Command="{Binding PlacementTarget.Tag.UninstallCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding}" />
                                             </ContextMenu>
                                         </Button.ContextMenu>
                                     </Button>
@@ -130,12 +138,12 @@
                     <c:ShapeBorder Style="{StaticResource PopupPanel}" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="560"
                                    Visibility="{Binding InstalledCount, Converter={StaticResource Hide}}">
                         <StackPanel>
-                            <TextBlock Text="NO MODS YET" Style="{StaticResource H1}" FontSize="22" HorizontalAlignment="Center" />
+                            <TextBlock Text="{i:T NO MODS YET}" Style="{StaticResource H1}" FontSize="22" HorizontalAlignment="Center" />
                             <Grid Style="{StaticResource PanelRule}">
                                 <Border Height="1" Background="{StaticResource Line}" VerticalAlignment="Center" Opacity="0.7" />
                                 <Border Width="44" Height="3" Background="{StaticResource Orange}" HorizontalAlignment="Center" />
                             </Grid>
-                            <TextBlock Style="{StaticResource Body}" TextAlignment="Center" Text="Get mods from the MODS tab." />
+                            <TextBlock Style="{StaticResource Body}" TextAlignment="Center" Text="{i:T Get mods from the MODS tab.}" />
                         </StackPanel>
                     </c:ShapeBorder>
                 </Grid>
@@ -150,11 +158,11 @@
                 </Grid.ColumnDefinitions>
                 <DockPanel>
                     <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,10">
-                        <TextBox Width="260" Text="{Binding OnlineSearch, UpdateSourceTrigger=PropertyChanged}" Tag="Search Thunderstore" Margin="0,0,10,6" />
+                        <TextBox Width="260" Text="{Binding OnlineSearch, UpdateSourceTrigger=PropertyChanged}" Tag="{i:T Search Thunderstore}" Margin="0,0,10,6" />
                         <ComboBox Width="190" ItemsSource="{Binding Categories}" SelectedItem="{Binding Category}" Margin="0,0,10,6" />
                         <ComboBox Width="170" ItemsSource="{Binding Sorts}" SelectedItem="{Binding Sort}" Margin="0,0,10,6" />
-                        <ToggleButton Style="{StaticResource Chip}" Content="DEPRECATED" IsChecked="{Binding ShowDeprecated}" Margin="0,0,10,6" />
-                        <Button Style="{StaticResource SmallButton}" Content="REFRESH" Command="{Binding RefreshOnlineListCommand}" Margin="0,0,0,6" />
+                        <ToggleButton Style="{StaticResource Chip}" Content="{i:T DEPRECATED}" IsChecked="{Binding ShowDeprecated}" Margin="0,0,10,6" />
+                        <Button Style="{StaticResource SmallButton}" Content="{i:T REFRESH}" Command="{Binding RefreshOnlineListCommand}" Margin="0,0,0,6" />
                     </WrapPanel>
                     <ListBox ItemsSource="{Binding OnlineView}" SelectedItem="{Binding SelectedPackage}">
                         <ListBox.ItemTemplate>
@@ -171,13 +179,13 @@
                                             <TextBlock Text="{Binding Name}" FontSize="16" FontWeight="Bold" />
                                             <TextBlock Text="{Binding Author}" FontSize="12" Opacity="0.7" Margin="8,0,0,0" VerticalAlignment="Center" />
                                             <Border Style="{StaticResource Badge}" Background="#E6101420" BorderBrush="{StaticResource Red}" Margin="8,0,0,0" Visibility="{Binding IsDeprecated, Converter={StaticResource Show}}">
-                                                <TextBlock Text="DEPRECATED" Style="{StaticResource BadgeText}" Foreground="{StaticResource Red}" />
+                                                <TextBlock Text="{i:T DEPRECATED}" Style="{StaticResource BadgeText}" Foreground="{StaticResource Red}" />
                                             </Border>
                                             <Border Style="{StaticResource Badge}" Background="#E6101420" BorderBrush="{StaticResource LightBlue}" Margin="8,0,0,0" Visibility="{Binding LatestFromGitHub, Converter={StaticResource Show}}">
                                                 <TextBlock Text="GITHUB" Style="{StaticResource BadgeText}" Foreground="{StaticResource LightBlue}" />
                                             </Border>
                                             <Border Style="{StaticResource Badge}" Background="#E6101420" BorderBrush="{StaticResource Orange}" Margin="8,0,0,0" Visibility="{Binding LatestFromWebsite, Converter={StaticResource Show}}">
-                                                <TextBlock Text="WEBSITE" Style="{StaticResource BadgeText}" Foreground="{StaticResource Orange}" />
+                                                <TextBlock Text="{i:T WEBSITE}" Style="{StaticResource BadgeText}" Foreground="{StaticResource Orange}" />
                                             </Border>
                                         </StackPanel>
                                         <TextBlock Text="{Binding Description}" FontSize="13" Opacity="0.85" TextWrapping="Wrap" MaxHeight="38" TextTrimming="CharacterEllipsis" Margin="0,2,0,4" />
@@ -206,7 +214,7 @@
                                             <Button.Style>
                                                 <Style TargetType="Button" BasedOn="{StaticResource SmallPrimaryButton}">
                                                     <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding ActionText}" Value="INSTALLED">
+                                                        <DataTrigger Binding="{Binding IsUpToDate}" Value="True">
                                                             <Setter Property="Background" Value="Transparent" />
                                                             <Setter Property="BorderBrush" Value="{StaticResource Green}" />
                                                             <Setter Property="Foreground" Value="{StaticResource Green}" />
@@ -225,7 +233,7 @@
                 <!-- Details -->
                 <c:ShapeBorder Grid.Column="2" Style="{StaticResource DarkPanel}">
                     <Grid>
-                        <TextBlock Text="Pick a mod to read about it." Style="{StaticResource Muted}" HorizontalAlignment="Center" VerticalAlignment="Center"
+                        <TextBlock Text="{i:T Pick a mod to read about it.}" Style="{StaticResource Muted}" HorizontalAlignment="Center" VerticalAlignment="Center"
                                    Visibility="{Binding SelectedPackage, Converter={StaticResource Hide}}" />
                         <DockPanel Visibility="{Binding SelectedPackage, Converter={StaticResource Show}}">
                             <Grid DockPanel.Dock="Top" DataContext="{Binding SelectedPackage}">
@@ -247,7 +255,7 @@
                                     <Button.Style>
                                         <Style TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
                                             <Style.Triggers>
-                                                <DataTrigger Binding="{Binding SelectedPackage.ActionText}" Value="INSTALLED">
+                                                <DataTrigger Binding="{Binding SelectedPackage.IsUpToDate}" Value="True">
                                                     <Setter Property="Background" Value="Transparent" />
                                                     <Setter Property="BorderBrush" Value="{StaticResource Green}" />
                                                     <Setter Property="Foreground" Value="{StaticResource Green}" />
@@ -257,10 +265,10 @@
                                     </Button.Style>
                                 </Button>
                                 <Button Style="{StaticResource HexButton}" Content="THUNDERSTORE" Command="{Binding OpenPackagePageCommand}" CommandParameter="{Binding SelectedPackage}" Margin="0,0,8,6" />
-                                <Button Style="{StaticResource HexButton}" Content="WEBSITE" Command="{Binding OpenPackageWebsiteCommand}" CommandParameter="{Binding SelectedPackage}" Margin="0,0,0,6" />
+                                <Button Style="{StaticResource HexButton}" Content="{i:T WEBSITE}" Command="{Binding OpenPackageWebsiteCommand}" CommandParameter="{Binding SelectedPackage}" Margin="0,0,0,6" />
                             </WrapPanel>
                             <TextBlock DockPanel.Dock="Top" Style="{StaticResource Muted}" FontSize="12" Margin="0,0,0,10" TextWrapping="Wrap">
-                                <Run Text="NEEDS:" Foreground="{StaticResource LightBlue}" FontWeight="SemiBold" /> <Run Text="{Binding SelectedPackage.Dependencies, Mode=OneWay}" />
+                                <Run Text="{i:T NEEDS:}" Foreground="{StaticResource LightBlue}" FontWeight="SemiBold" /> <Run Text="{Binding SelectedPackage.Dependencies, Mode=OneWay}" />
                             </TextBlock>
                             <Border DockPanel.Dock="Top" Height="1" Background="{StaticResource LightGrey}" Margin="0,0,0,10" />
                             <FlowDocumentScrollViewer Document="{Binding Readme}" VerticalScrollBarVisibility="Auto" IsToolBarVisible="False" Focusable="False" />

@@ -31,12 +31,13 @@ public sealed class Dialogs
         return Show(title, text, buttons);
     }
 
-    public void Info(string title, string message) => Ask(title, message, new DialogButton("OK", ButtonKind.Primary));
+    public void Info(string title, string message) => Ask(title, message, new DialogButton(Loc.T("OK"), ButtonKind.Primary));
 
-    public void Error(string title, string message) => Ask(title, message, new DialogButton("OK", ButtonKind.Cancel));
+    public void Error(string title, string message) => Ask(title, message, new DialogButton(Loc.T("OK"), ButtonKind.Cancel));
 
-    public bool Confirm(string title, string message, string yes, string no = "CANCEL") =>
-        Ask(title, message, new DialogButton(yes, ButtonKind.Primary), new DialogButton(no)) == 0;
+    /// <summary>A yes/no question; <paramref name="no"/> is CANCEL (translated) when not given.</summary>
+    public bool Confirm(string title, string message, string yes, string? no = null) =>
+        Ask(title, message, new DialogButton(yes, ButtonKind.Primary), new DialogButton(no ?? Loc.T("CANCEL"))) == 0;
 
     /// <summary>The join dialog: what the lobby needs and what changes for this game. True to go ahead.</summary>
     public bool ConfirmJoin(JoinPlan plan, Func<JoinPlan, ResolvedJoin> resolve, Func<ResolvedJoin, bool> needsRestart, bool gameRunning)

@@ -128,11 +128,11 @@ public partial class MainViewModel : ObservableObject
 
     [ObservableProperty] private object currentPage;
     [ObservableProperty] private string currentPageName = "browser";
-    [ObservableProperty] private string statusText = "Ready.";
+    [ObservableProperty] private string statusText = Loc.T("Ready.");
     [ObservableProperty] private double statusProgress;
     [ObservableProperty] private bool statusProgressVisible;
     [ObservableProperty] private GameState gameState;
-    [ObservableProperty] private string gameStateText = "NOT RUNNING";
+    [ObservableProperty] private string gameStateText = Loc.T("NOT RUNNING");
     [ObservableProperty] private bool isBusy;
 
     public bool GameRunning => GameState != GameState.NotRunning && GameState != GameState.Starting;
@@ -142,8 +142,8 @@ public partial class MainViewModel : ObservableObject
         get
         {
             int count = Service.Index.All.Count;
-            if (count == 0) return "THUNDERSTORE: NOT LOADED";
-            return Service.Thunderstore.IsOffline ? $"THUNDERSTORE: OFFLINE ({count} MODS, CACHED)" : $"THUNDERSTORE: {count} MODS";
+            if (count == 0) return Loc.T("THUNDERSTORE: NOT LOADED");
+            return Service.Thunderstore.IsOffline ? Loc.F("THUNDERSTORE: OFFLINE ({0} MODS, CACHED)", count) : Loc.F("THUNDERSTORE: {0} MODS", count);
         }
     }
 
@@ -240,7 +240,7 @@ public partial class MainViewModel : ObservableObject
     private void CheckLaunch(DateTime launch)
     {
         _checkedLaunch = launch;
-        SetStatus("Void Crew started without the launcher's mods. Details are in the launcher log (SETTINGS, LAUNCHER LOG).");
+        SetStatus(Loc.T("Void Crew started without the launcher's mods. Details are in the launcher log (SETTINGS, LAUNCHER LOG)."));
         string? game = Service.GameDirectory;
         _ = Task.Run(() =>
         {
@@ -293,38 +293,38 @@ public partial class MainViewModel : ObservableObject
         GameState = next;
         GameStateText = next switch
         {
-            GameState.NotRunning => "NOT RUNNING",
-            GameState.Starting => "STARTING",
-            GameState.RunningOutside => "RUNNING WITHOUT THE LAUNCHER",
-            GameState.Booting => "LOADING",
-            GameState.Menu => state?.InLobby == true ? $"MAIN MENU · {RegionName(state.Region)}" : "MAIN MENU · CONNECTING",
-            GameState.Hub => state?.IsHost == true ? $"HOSTING · {state.Players}/{state.MaxPlayers}" : $"IN A LOBBY · {state?.Players}/{state?.MaxPlayers}",
-            GameState.Mission => "IN A MISSION",
-            _ => "LOADING",
+            GameState.NotRunning => Loc.T("NOT RUNNING"),
+            GameState.Starting => Loc.T("STARTING"),
+            GameState.RunningOutside => Loc.T("RUNNING WITHOUT THE LAUNCHER"),
+            GameState.Booting => Loc.T("LOADING"),
+            GameState.Menu => state?.InLobby == true ? Loc.F("MAIN MENU · {0}", RegionName(state.Region)) : Loc.T("MAIN MENU · CONNECTING"),
+            GameState.Hub => state?.IsHost == true ? Loc.F("HOSTING · {0}/{1}", state.Players, state.MaxPlayers) : Loc.F("IN A LOBBY · {0}/{1}", state?.Players, state?.MaxPlayers),
+            GameState.Mission => Loc.T("IN A MISSION"),
+            _ => Loc.T("LOADING"),
         };
     }
 
     public static string RegionName(string? code) => code?.ToLowerInvariant() switch
     {
-        "eu" => "EUROPE",
-        "us" => "USA EAST",
-        "usw" => "USA WEST",
-        "asia" => "ASIA",
-        "jp" => "JAPAN",
-        "au" => "AUSTRALIA",
-        "sa" => "SOUTH AMERICA",
-        "kr" => "KOREA",
-        "in" => "INDIA",
-        "cae" => "CANADA",
-        "za" => "SOUTH AFRICA",
-        "tr" => "TURKEY",
-        "uae" => "UAE",
-        "ussc" => "USA SOUTH",
-        "hk" => "HONG KONG",
-        "cn" => "CHINA",
-        "ru" => "RUSSIA",
-        "rue" => "RUSSIA EAST",
-        null or "" => "NO REGION",
+        "eu" => Loc.T("EUROPE"),
+        "us" => Loc.T("USA EAST"),
+        "usw" => Loc.T("USA WEST"),
+        "asia" => Loc.T("ASIA"),
+        "jp" => Loc.T("JAPAN"),
+        "au" => Loc.T("AUSTRALIA"),
+        "sa" => Loc.T("SOUTH AMERICA"),
+        "kr" => Loc.T("KOREA"),
+        "in" => Loc.T("INDIA"),
+        "cae" => Loc.T("CANADA"),
+        "za" => Loc.T("SOUTH AFRICA"),
+        "tr" => Loc.T("TURKEY"),
+        "uae" => Loc.T("UAE"),
+        "ussc" => Loc.T("USA SOUTH"),
+        "hk" => Loc.T("HONG KONG"),
+        "cn" => Loc.T("CHINA"),
+        "ru" => Loc.T("RUSSIA"),
+        "rue" => Loc.T("RUSSIA EAST"),
+        null or "" => Loc.T("NO REGION"),
         _ => code.ToUpperInvariant(),
     };
 
@@ -335,7 +335,7 @@ public partial class MainViewModel : ObservableObject
         if (Service.LastLaunchMode == LaunchMode.Browse && Service.Settings.MinimizeGameWhenBrowsing) ShowWindow();
         if (Service.CurrentLaunch == null)
         {
-            SetStatus("Void Crew is connected, but it wasn't started by this launcher session; its mod list is unknown.");
+            SetStatus(Loc.T("Void Crew is connected, but it wasn't started by this launcher session; its mod list is unknown."));
         }
     }
 
@@ -344,17 +344,17 @@ public partial class MainViewModel : ObservableObject
     private bool CanPlay() => !IsBusy && GameState == GameState.NotRunning;
 
     [RelayCommand(CanExecute = nameof(CanPlay))]
-    private Task Play() => RunAsync("Starting Void Crew", () => Service.LaunchAsync(LaunchMode.Play));
+    private Task Play() => RunAsync(Loc.T("Starting Void Crew"), () => Service.LaunchAsync(LaunchMode.Play));
 
     private bool CanCloseGame() => !IsBusy && GameRunning;
 
     [RelayCommand(CanExecute = nameof(CanCloseGame))]
     private async Task CloseGame()
     {
-        if (!Dialogs.Confirm("Close Void Crew", "Close the game now? Anything you haven't saved in the game is lost.", "CLOSE GAME")) return;
-        await RunAsync("Closing Void Crew", async () =>
+        if (!Dialogs.Confirm(Loc.T("Close Void Crew"), Loc.T("Close the game now? Anything you haven't saved in the game is lost."), Loc.T("CLOSE GAME"))) return;
+        await RunAsync(Loc.T("Closing Void Crew"), async () =>
         {
-            if (!await CloseGameOrAskAsync()) SetStatus("Void Crew is still running.");
+            if (!await CloseGameOrAskAsync()) SetStatus(Loc.T("Void Crew is still running."));
         });
     }
 
@@ -373,9 +373,9 @@ public partial class MainViewModel : ObservableObject
     public async Task<bool> CloseGameOrAskAsync()
     {
         if (await Service.CloseGameAsync(TimeSpan.FromSeconds(25))) return true;
-        int choice = Dialogs.Ask("Void Crew is still running",
-            "Void Crew didn't close. It may be showing a question or still saving.\n\nForce it to close? Anything not saved in the game is lost.",
-            new DialogButton("FORCE CLOSE", ButtonKind.Cancel), new DialogButton("WAIT"));
+        int choice = Dialogs.Ask(Loc.T("Void Crew is still running"),
+            Loc.T("Void Crew didn't close. It may be showing a question or still saving.\n\nForce it to close? Anything not saved in the game is lost."),
+            new DialogButton(Loc.T("FORCE CLOSE"), ButtonKind.Cancel), new DialogButton(Loc.T("WAIT")));
         if (choice != 0) return await GameProcess.WaitForExitAsync(TimeSpan.FromSeconds(30));
         GameProcess.Kill();
         return await GameProcess.WaitForExitAsync(TimeSpan.FromSeconds(10));
@@ -385,7 +385,7 @@ public partial class MainViewModel : ObservableObject
     public bool CheckIdle(string what)
     {
         if (!IsBusy) return true;
-        SetStatus($"{what}: wait until the launcher has finished what it's doing, then try again.");
+        SetStatus(Loc.F("{0}: wait until the launcher has finished what it's doing, then try again.", what));
         return false;
     }
 
@@ -396,40 +396,41 @@ public partial class MainViewModel : ObservableObject
     public async Task<bool> RunAsync(string what, Func<Task> work)
     {
         if (!CheckIdle(what) || !TryClaimBusy()) return false;
+        string working = Loc.F("{0}...", what);
         try
         {
-            SetStatus(what + "...");
+            SetStatus(working);
             try
             {
                 await work();
             }
             catch (DoorstopConsentNeededException needed)
             {
-                if (!Dialogs.Confirm("Add BepInEx's loader",
-                        "To load mods, Void Crew needs BepInEx's loader next to its exe: two small files (winhttp.dll and doorstop_config.ini) " +
-                        $"in\n{needed.GameDirectory}\n\nThe launcher adds them switched off, so starting Void Crew from Steam stays unmodded. " +
-                        "Everything else (BepInEx and your mods) stays in the launcher's own folder. You can remove them on the SETTINGS tab.",
-                        "ADD AND CONTINUE"))
+                if (!Dialogs.Confirm(Loc.T("Add BepInEx's loader"),
+                        Loc.F("To load mods, Void Crew needs BepInEx's loader next to its exe: two small files (winhttp.dll and doorstop_config.ini) in\n{0}\n\nThe launcher adds them switched off, so starting Void Crew from Steam stays unmodded. Everything else (BepInEx and your mods) stays in the launcher's own folder. You can remove them on the SETTINGS tab.",
+                            needed.GameDirectory),
+                        Loc.T("ADD AND CONTINUE")))
                 {
-                    SetStatus("Cancelled: the game folder was left as it is.");
+                    SetStatus(Loc.T("Cancelled: the game folder was left as it is."));
                     return false;
                 }
                 Service.Settings.DoorstopConsent = true;
                 Service.SaveSettings();
                 await work();
-            }            if (StatusText == what + "...") SetStatus("Done.");
+            }
+            if (StatusText == working) SetStatus(Loc.T("Done."));
             return true;
         }
         catch (OperationCanceledException)
         {
-            SetStatus("Cancelled.");
+            SetStatus(Loc.T("Cancelled."));
             return false;
         }
         catch (Exception e)
         {
             AppLog.Error(what + " failed", e);
-            SetStatus(what + " failed.");
-            Dialogs.Error(what + " failed", e.Message);
+            SetStatus(Loc.F("{0} failed.", what));
+            Dialogs.Error(Loc.F("{0} failed", what), e.Message);
             return false;
         }
         finally
@@ -489,21 +490,23 @@ public partial class MainViewModel : ObservableObject
                 AppLog.Error("Updating the launcher failed", e);
             }
 
-            string updatedText = updatedFrom != null ? $"Updated the launcher to {AppInfo.Version}. " : "";
+            string? updatedText = updatedFrom != null ? Loc.F("Updated the launcher to {0}.", AppInfo.Version) : null;
             try
             {
-                SetStatus("Loading Thunderstore's Void Crew mods...");
+                SetStatus(Loc.T("Loading Thunderstore's Void Crew mods..."));
                 await Service.RefreshPackagesAsync(false);
                 string? modsText = Service.Settings.AutoUpdateMods ? await UpdateModsAsync() : null;
                 string? githubText = await AddMissingGitHubModsAsync();
                 if (githubText != null) modsText = modsText == null ? githubText : modsText + " " + githubText;
                 int updates = Service.Mods.Updates().Count;
-                SetStatus(updatedText + (modsText ?? (updates > 0 ? $"{updates} of your mods can be updated (MOD MANAGER)." : "Ready.")));
+                string text = modsText ?? (updates > 0 ? Loc.F("{0} of your mods can be updated (MOD MANAGER).", updates) : Loc.T("Ready."));
+                SetStatus(updatedText != null ? Loc.F("{0} {1}", updatedText, text) : text);
             }
             catch (Exception e)
             {
                 AppLog.Error("Loading Thunderstore's mod list failed", e);
-                SetStatus(updatedText + "Thunderstore couldn't be reached. Mods you have still work; try REFRESH on the MODS tab later.");
+                string text = Loc.T("Thunderstore couldn't be reached. Mods you have still work; try REFRESH on the MODS tab later.");
+                SetStatus(updatedText != null ? Loc.F("{0} {1}", updatedText, text) : text);
             }
         }
         finally
@@ -514,7 +517,7 @@ public partial class MainViewModel : ObservableObject
         if (Service.GameDirectory == null)
         {
             Navigate("settings");
-            Dialogs.Info("Void Crew not found", "The launcher couldn't find Void Crew through Steam. Choose its folder on the SETTINGS tab (the one with Void Crew.exe).");
+            Dialogs.Info(Loc.T("Void Crew not found"), Loc.T("The launcher couldn't find Void Crew through Steam. Choose its folder on the SETTINGS tab (the one with Void Crew.exe)."));
         }
     }
 
@@ -548,14 +551,14 @@ public partial class MainViewModel : ObservableObject
         LauncherLink? link = LauncherLinks.Parse(text);
         if (link == null)
         {
-            Dialogs.Error("Link not understood", "This link isn't one the Void Crew Mod Launcher knows. Update the launcher (SETTINGS > CHECK FOR UPDATES) and try again.");
+            Dialogs.Error(Loc.T("Link not understood"), Loc.T("This link isn't one the Void Crew Mod Launcher knows. Update the launcher (SETTINGS > CHECK FOR UPDATES) and try again."));
             return;
         }
         if (link.Action != LinkAction.Install || link.ModId == null) return;
 
         await _started.Task;
         await WaitUntilIdleAsync();
-        SetStatus($"Looking up {link.ModId}...");
+        SetStatus(Loc.F("Looking up {0}...", link.ModId));
         try
         {
             await Service.FreshenAsync(new[] { link.ModId });
@@ -567,15 +570,15 @@ public partial class MainViewModel : ObservableObject
         Core.Thunderstore.TsPackage? package = Service.Index.Find(link.ModId);
         if (package == null)
         {
-            SetStatus("Ready.");
-            Dialogs.Error("Mod not found", $"{link.ModId} isn't on Thunderstore's Void Crew list or GitHub, so the launcher can't install it.");
+            SetStatus(Loc.T("Ready."));
+            Dialogs.Error(Loc.T("Mod not found"), Loc.F("{0} isn't on Thunderstore's Void Crew list or GitHub, so the launcher can't install it.", link.ModId));
             return;
         }
         string version = link.Version ?? package.Latest?.VersionNumber ?? "";
         if (link.Version != null && package.Version(link.Version) == null)
         {
-            SetStatus("Ready.");
-            Dialogs.Error("Version not found", $"{package.DisplayName} {link.Version} isn't on Thunderstore.");
+            SetStatus(Loc.T("Ready."));
+            Dialogs.Error(Loc.T("Version not found"), Loc.F("{0} {1} isn't on Thunderstore.", package.DisplayName, link.Version));
             return;
         }
         InstalledMod? mine = Service.Library.Find(package.FullName);
@@ -585,35 +588,39 @@ public partial class MainViewModel : ObservableObject
         {
             if (mine.Enabled)
             {
-                SetStatus($"{package.DisplayName} {version} is installed and on.");
+                SetStatus(Loc.F("{0} {1} is installed and on.", package.DisplayName, version));
                 return;
             }
-            if (!Dialogs.Confirm("Turn on mod", $"A link asked the launcher to turn on {package.DisplayName} {version} by {package.Author}, which you have switched off.", "TURN ON"))
+            if (!Dialogs.Confirm(Loc.T("Turn on mod"), Loc.F("A link asked the launcher to turn on {0} {1} by {2}, which you have switched off.", package.DisplayName, version, package.Author), Loc.T("TURN ON")))
             {
-                SetStatus("Ready.");
+                SetStatus(Loc.T("Ready."));
                 return;
             }
             await WaitUntilIdleAsync();
-            if (await RunAsync($"Turning on {mine.DisplayName}", () => Service.SetModEnabledAsync(mine.Id, true, null)))
+            if (await RunAsync(Loc.F("Turning on {0}", mine.DisplayName), () => Service.SetModEnabledAsync(mine.Id, true, null)))
             {
-                SetStatus($"{package.DisplayName} {version} is installed and on.");
+                SetStatus(Loc.F("{0} {1} is installed and on.", package.DisplayName, version));
             }
             return;
         }
 
         string needs = string.Join(", ", Service.GitHubMods.NeededBy(package.FullName).Where(m => Service.CopyOf(m) == null).Select(m => m.Name));
-        string message = $"A link asked the launcher to install {package.DisplayName} {version} by {package.Author}"
-                         + (needs.Length > 0 ? $", with {needs} which it needs" : "")
-                         + (mine != null ? $" (you have {mine.Version})." : ".");
-        if (!Dialogs.Confirm(mine != null ? "Update mod" : "Install mod", message, mine != null ? "UPDATE" : "INSTALL"))
+        string message = (needs.Length > 0, mine != null) switch
         {
-            SetStatus("Ready.");
+            (true, true) => Loc.F("A link asked the launcher to install {0} {1} by {2}, with {3} which it needs (you have {4}).", package.DisplayName, version, package.Author, needs, mine!.Version),
+            (true, false) => Loc.F("A link asked the launcher to install {0} {1} by {2}, with {3} which it needs.", package.DisplayName, version, package.Author, needs),
+            (false, true) => Loc.F("A link asked the launcher to install {0} {1} by {2} (you have {3}).", package.DisplayName, version, package.Author, mine!.Version),
+            (false, false) => Loc.F("A link asked the launcher to install {0} {1} by {2}.", package.DisplayName, version, package.Author),
+        };
+        if (!Dialogs.Confirm(mine != null ? Loc.T("Update mod") : Loc.T("Install mod"), message, mine != null ? Loc.T("UPDATE") : Loc.T("INSTALL")))
+        {
+            SetStatus(Loc.T("Ready."));
             return;
         }
         // Something may have started while the question was up.
         await WaitUntilIdleAsync();
         var progress = new SyncProgress<InstallStatus>(s => OnUi(() => SetStatus(s.Message, s.Fraction)));
-        bool ok = await RunAsync($"Installing {package.DisplayName}", async () =>
+        bool ok = await RunAsync(Loc.F("Installing {0}", package.DisplayName), async () =>
         {
             if (link.Version != null)
             {
@@ -625,7 +632,7 @@ public partial class MainViewModel : ObservableObject
                 await Service.InstallModAsync(package.FullName, progress);
             }
         });
-        if (ok) SetStatus($"{package.DisplayName} {Service.Library.Find(package.FullName)?.Version ?? version} is installed and on. It loads the next time you play or host.");
+        if (ok) SetStatus(Loc.F("{0} {1} is installed and on. It loads the next time you play or host.", package.DisplayName, Service.Library.Find(package.FullName)?.Version ?? version));
     }
 
     /// <summary>Brings the launcher's window to the front (a link was clicked in a browser).</summary>
@@ -660,13 +667,22 @@ public partial class MainViewModel : ObservableObject
         }
 
         (List<string> Updated, List<string> Failed) result = (new List<string>(), new List<string>());
-        await RunAsync("Updating mods", async () =>
+        await RunAsync(Loc.T("Updating mods"), async () =>
         {
             result = await Service.UpdateModsAsync(new SyncProgress<InstallStatus>(s => OnUi(() => SetStatus(s.Message, s.Fraction))));
         });
         string text = "";
-        if (result.Updated.Count > 0) text = $"Updated {result.Updated.Count} mod{(result.Updated.Count == 1 ? "" : "s")}: {string.Join(", ", result.Updated)}.";
-        if (result.Failed.Count > 0) text += $"{(text.Length > 0 ? " " : "")}Couldn't update {string.Join(", ", result.Failed)} (see the launcher log).";
+        if (result.Updated.Count > 0)
+        {
+            text = result.Updated.Count == 1
+                ? Loc.F("Updated {0} mod: {1}.", result.Updated.Count, string.Join(", ", result.Updated))
+                : Loc.F("Updated {0} mods: {1}.", result.Updated.Count, string.Join(", ", result.Updated));
+        }
+        if (result.Failed.Count > 0)
+        {
+            string failed = Loc.F("Couldn't update {0} (see the launcher log).", string.Join(", ", result.Failed));
+            text = text.Length > 0 ? Loc.F("{0} {1}", text, failed) : failed;
+        }
         if (text.Length > 0) SetStatus(text);
         await TellGameAboutUpdatesAsync();
         return text.Length > 0 ? text : null;
@@ -676,11 +692,11 @@ public partial class MainViewModel : ObservableObject
     private async Task<string?> AddMissingGitHubModsAsync()
     {
         List<string> added = new();
-        await RunAsync("Installing what your mods need", async () =>
+        await RunAsync(Loc.T("Installing what your mods need"), async () =>
         {
             added = await Service.AddMissingGitHubModsAsync(new SyncProgress<InstallStatus>(s => OnUi(() => SetStatus(s.Message, s.Fraction))));
         });
-        return added.Count > 0 ? $"Installed from GitHub: {string.Join(", ", added)}." : null;
+        return added.Count > 0 ? Loc.F("Installed from GitHub: {0}.", string.Join(", ", added)) : null;
     }
 
     /// <summary>
@@ -724,9 +740,13 @@ public partial class MainViewModel : ObservableObject
         if (news.Count == 0) return;
         string names = string.Join(", ", news.Select(n => $"{n.Name} {n.Version}"));
         bool one = news.Count == 1;
-        string text = news.All(n => n.Ready)
-            ? $"Update ready: {names}. Restart Void Crew from the Mod Launcher to play with {(one ? "it" : "them")}."
-            : $"Update out: {names}. Update {(one ? "it" : "them")} in the Mod Launcher, then restart Void Crew from there.";
+        string text = (news.All(n => n.Ready), one) switch
+        {
+            (true, true) => Loc.F("Update ready: {0}. Restart Void Crew from the Mod Launcher to play with it.", names),
+            (true, false) => Loc.F("Update ready: {0}. Restart Void Crew from the Mod Launcher to play with them.", names),
+            (false, true) => Loc.F("Update out: {0}. Update it in the Mod Launcher, then restart Void Crew from there.", names),
+            (false, false) => Loc.F("Update out: {0}. Update them in the Mod Launcher, then restart Void Crew from there.", names),
+        };
         if (await Service.Bridge.SendAsync(new NotifyCommand { Text = text })) AppLog.Info("Told the game: " + text);
     }
 
@@ -739,26 +759,26 @@ public partial class MainViewModel : ObservableObject
     {
         if (!Installer.IsPublishedBuild)
         {
-            if (manual) SetStatus("This is a developer build; it doesn't update itself.");
+            if (manual) SetStatus(Loc.T("This is a developer build; it doesn't update itself."));
             return false;
         }
-        if (manual && !CheckIdle("Checking for updates")) return false;
+        if (manual && !CheckIdle(Loc.T("Checking for updates"))) return false;
         using var updater = new Updater();
         LauncherRelease? release;
         try
         {
-            if (manual) SetStatus("Checking GitHub for a new launcher...");
+            if (manual) SetStatus(Loc.T("Checking GitHub for a new launcher..."));
             release = await updater.CheckAsync(AppInfo.Version);
         }
         catch (Exception e)
         {
             AppLog.Warn($"Checking GitHub for a new launcher failed: {e.Message}");
-            if (manual) SetStatus("GitHub couldn't be reached to check for a new launcher.");
+            if (manual) SetStatus(Loc.T("GitHub couldn't be reached to check for a new launcher."));
             return false;
         }
         if (release == null)
         {
-            if (manual) SetStatus($"The launcher is up to date ({AppInfo.Version}).");
+            if (manual) SetStatus(Loc.F("The launcher is up to date ({0}).", AppInfo.Version));
             return false;
         }
 
@@ -766,14 +786,14 @@ public partial class MainViewModel : ObservableObject
         if (!manual && settings.UpdateTriedVersion == release.Version && settings.UpdateTriedUtc is { } tried && DateTime.UtcNow - tried < TimeSpan.FromHours(6))
         {
             AppLog.Warn($"Launcher {release.Version} was installed at {tried:u} but this is still {AppInfo.Version}; not trying again for a while.");
-            SetStatus($"Launcher {release.Version} is out but didn't install. Try CHECK FOR UPDATES on the SETTINGS tab, or get it from GitHub.");
+            SetStatus(Loc.F("Launcher {0} is out but didn't install. Try CHECK FOR UPDATES on the SETTINGS tab, or get it from GitHub.", release.Version));
             return false;
         }
 
         // Busy from the download window until the launcher closes: nothing else starts meanwhile.
         if (!TryClaimBusy())
         {
-            if (manual) CheckIdle("Checking for updates");
+            if (manual) CheckIdle(Loc.T("Checking for updates"));
             return false;
         }
         try
@@ -784,12 +804,12 @@ public partial class MainViewModel : ObservableObject
             {
                 if (error == null || error is OperationCanceledException)
                 {
-                    SetStatus($"Update to {release.Version} cancelled. The launcher tries again next time it starts.");
+                    SetStatus(Loc.F("Update to {0} cancelled. The launcher tries again next time it starts.", release.Version));
                 }
                 else
                 {
                     AppLog.Error($"Downloading launcher {release.Version} failed", error);
-                    SetStatus($"The launcher couldn't update to {release.Version}: {error.Message}");
+                    SetStatus(Loc.F("The launcher couldn't update to {0}: {1}", release.Version, error.Message));
                 }
                 return false;
             }
@@ -804,7 +824,7 @@ public partial class MainViewModel : ObservableObject
             catch (Exception e)
             {
                 AppLog.Error("Starting the launcher update failed", e);
-                SetStatus($"The launcher couldn't update to {release.Version}: {e.Message}");
+                SetStatus(Loc.F("The launcher couldn't update to {0}: {1}", release.Version, e.Message));
                 return false;
             }
             ClosingForUpdate = true;

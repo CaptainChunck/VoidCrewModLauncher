@@ -10,7 +10,8 @@ namespace VoidCrewModLauncher;
 
 /// <summary>
 /// Start-up: one launcher at a time, the data folder (--data-dir or VCML_DATA_DIR), logging, then the main window.
-/// --render-previews &lt;folder&gt; draws every page with sample data into PNGs and exits (for checking the look).
+/// --render-previews &lt;folder&gt; [--preview-language &lt;code&gt;] draws every page with sample data into PNGs and exits
+/// (for checking the look).
 /// </summary>
 public partial class App : Application
 {
@@ -23,14 +24,20 @@ public partial class App : Application
         string[] args = StartArguments(e.Args);
         string? dataDir = Argument(args, "--data-dir");
         string? previews = Argument(args, "--render-previews");
+        WaitForRestartedLauncher(args);
 
         if (previews != null)
         {
+            // English for the README's screenshots; --preview-language <code> to check how a translation fits.
+            Loc.Use(Argument(args, "--preview-language") ?? Loc.English);
             ShutdownMode = ShutdownMode.OnExplicitShutdown;
             Previews.Render(previews);
             Shutdown();
             return;
         }
+
+        // The language first: every message from here on is shown in it.
+        Loc.Use(LauncherSettings.ReadLanguage(AppPaths.FromEnvironment(dataDir)));
 
         // A downloaded update installing itself over the launcher that downloaded it (see Installer.StartUpdate).
         var locations = InstallLocations.ForThisUser();
@@ -68,7 +75,7 @@ public partial class App : Application
                 Shutdown();
                 return;
             }
-            MessageBox.Show("The Void Crew Mod Launcher is already open.", AppInfo.Name, MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(Loc.T("The Void Crew Mod Launcher is already open."), AppInfo.Name, MessageBoxButton.OK, MessageBoxImage.Information);
             Shutdown();
             return;
         }
@@ -77,6 +84,9 @@ public partial class App : Application
         paths.EnsureCreated();
         AppLog.Init(paths.LauncherLog);
         AppLog.Info($"Data folder: {paths.Root}");
+        // Again, now that there is a log: a broken translation is noted in it.
+        Loc.Use(LauncherSettings.ReadLanguage(paths));
+        AppLog.Info($"Language: {Loc.Current}");
         DispatcherUnhandledException += OnUnhandled;
         TaskScheduler.UnobservedTaskException += (_, args) =>
         {
@@ -93,7 +103,7 @@ public partial class App : Application
             // settings.json or library.json can't be read right now (another program has it open). Starting anyway
             // would mean starting from empty files and saving them over the player's.
             AppLog.Error("Could not read the launcher's files", ex);
-            MessageBox.Show($"The launcher can't read its files right now:\n{ex.Message}\n\nClose any program that might have them open, then start the launcher again.",
+            MessageBox.Show(Loc.F("The launcher can't read its files right now:\n{0}\n\nClose any program that might have them open, then start the launcher again.", ex.Message),
                 AppInfo.Name, MessageBoxButton.OK, MessageBoxImage.Warning);
             Shutdown();
             return;
@@ -109,6 +119,45 @@ public partial class App : Application
         _links.Start(received => Dispatcher.BeginInvoke(() => _ = model.HandleLinkAsync(received)));
         RegisterLinks(locations);
         _ = model.StartAsync(Argument(args, Installer.UpdatedArgument), link);
+    }
+
+    /// <summary>The launcher restarting itself (for a new language) passes its process id after this: wait until it's gone.</summary>
+    private const string WaitForArgument = "--wait-for";
+
+    /// <summary>Starts the launcher again with <paramref name="arguments"/> and closes this one.</summary>
+    public static void Restart(IEnumerable<string> arguments)
+    {
+        if (Environment.ProcessPath is not { } exe) return;
+        var start = new ProcessStartInfo(exe) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(exe)! };
+        foreach (string argument in arguments) start.ArgumentList.Add(argument);
+        start.ArgumentList.Add(WaitForArgument);
+        start.ArgumentList.Add(Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        try
+        {
+            Process.Start(start)?.Dispose();
+        }
+        catch (Exception e)
+        {
+            AppLog.Error("Restarting the launcher failed", e);
+            return;
+        }
+        AppLog.Info("Restarting the launcher.");
+        Current?.Shutdown();
+    }
+
+    /// <summary>A restart waits for the launcher it replaces to close (it holds the one-launcher lock until then).</summary>
+    private static void WaitForRestartedLauncher(string[] args)
+    {
+        if (!int.TryParse(Argument(args, WaitForArgument), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int id)) return;
+        try
+        {
+            using Process old = Process.GetProcessById(id);
+            old.WaitForExit(20_000);
+        }
+        catch (Exception e) when (e is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            // It has already closed.
+        }
     }
 
     /// <summary>The marker before a link the launcher passes to itself when it restarts after a self-update.</summary>
@@ -191,7 +240,7 @@ public partial class App : Application
         }
         catch (Exception error)
         {
-            MessageBox.Show($"The launcher couldn't update itself ({error.Message}).\n\nIt opens as it was. The new version is on {AppInfo.RepositoryUrl}/releases/latest.",
+            MessageBox.Show(Loc.F("The launcher couldn't update itself ({0}).\n\nIt opens as it was. The new version is on {1}.", error.Message, AppInfo.RepositoryUrl + "/releases/latest"),
                 AppInfo.Name, MessageBoxButton.OK, MessageBoxImage.Warning);
             int updated = restart.FindIndex(a => a.Equals(Installer.UpdatedArgument, StringComparison.OrdinalIgnoreCase));
             if (updated >= 0) restart.RemoveRange(updated, Math.Min(2, restart.Count - updated));
@@ -213,7 +262,7 @@ public partial class App : Application
     private void OnUnhandled(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
         AppLog.Error("Unexpected error", e.Exception);
-        MessageBox.Show($"Something went wrong:\n\n{e.Exception.Message}\n\nDetails are in the launcher's log (SETTINGS > Launcher log).", AppInfo.Name, MessageBoxButton.OK, MessageBoxImage.Error);
+        MessageBox.Show(Loc.F("Something went wrong:\n\n{0}\n\nDetails are in the launcher's log (SETTINGS > Launcher log).", e.Exception.Message), AppInfo.Name, MessageBoxButton.OK, MessageBoxImage.Error);
         e.Handled = true;
     }
 
@@ -222,7 +271,7 @@ public partial class App : Application
     {
         if (Installer.InstalledCopyIsRunning(locations))
         {
-            MessageBox.Show("The Void Crew Mod Launcher is open. Close it, then run this again to update it.", AppInfo.Name, MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(Loc.T("The Void Crew Mod Launcher is open. Close it, then run this again to update it."), AppInfo.Name, MessageBoxButton.OK, MessageBoxImage.Information);
             return true;
         }
         try
@@ -236,7 +285,7 @@ public partial class App : Application
         }
         catch (Exception error)
         {
-            MessageBox.Show($"The launcher couldn't install itself ({error.Message}). It will run from where it is instead.", AppInfo.Name, MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(Loc.F("The launcher couldn't install itself ({0}). It will run from where it is instead.", error.Message), AppInfo.Name, MessageBoxButton.OK, MessageBoxImage.Warning);
             return false;
         }
     }
@@ -244,11 +293,11 @@ public partial class App : Application
     private static void RunUninstall(InstallLocations locations, string? dataDir)
     {
         var dialogs = new Dialogs();
-        if (!dialogs.Confirm("Uninstall", "Remove the Void Crew Mod Launcher from this PC?", "UNINSTALL")) return;
+        if (!dialogs.Confirm(Loc.T("Uninstall"), Loc.T("Remove the Void Crew Mod Launcher from this PC?"), Loc.T("UNINSTALL"))) return;
         AppPaths paths = AppPaths.FromEnvironment(dataDir);
-        bool removeData = Directory.Exists(paths.Root) && dialogs.Ask("Downloaded mods and settings",
-            "Delete the launcher's downloaded mods and settings too?",
-            new DialogButton("DELETE THEM", ButtonKind.Cancel), new DialogButton("KEEP THEM")) == 0;
+        bool removeData = Directory.Exists(paths.Root) && dialogs.Ask(Loc.T("Downloaded mods and settings"),
+            Loc.T("Delete the launcher's downloaded mods and settings too?"),
+            new DialogButton(Loc.T("DELETE THEM"), ButtonKind.Cancel), new DialogButton(Loc.T("KEEP THEM"))) == 0;
         string? game = null;
         try
         {
@@ -260,7 +309,9 @@ public partial class App : Application
             AppLog.Warn("Uninstall could not find the game folder: " + error.Message);
         }
         Installer.Uninstall(locations, game, removeData ? paths.Root : null);
-        dialogs.Info("Uninstalled", "The Void Crew Mod Launcher is removed." + (removeData ? "" : " Your mods and settings are still in " + paths.Root + "."));
+        dialogs.Info(Loc.T("Uninstalled"), removeData
+            ? Loc.T("The Void Crew Mod Launcher is removed.")
+            : Loc.F("The Void Crew Mod Launcher is removed. Your mods and settings are still in {0}.", paths.Root));
     }
 
     private static string? Argument(string[] args, string name)

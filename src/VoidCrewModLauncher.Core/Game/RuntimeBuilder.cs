@@ -176,7 +176,7 @@ public static class EmbeddedBridge
     public static byte[] Read()
     {
         using Stream stream = typeof(EmbeddedBridge).Assembly.GetManifestResourceStream(FileName)
-            ?? throw new InvalidOperationException("This build of the launcher doesn't contain its bridge plugin.");
+            ?? throw new InvalidOperationException(Loc.T("This build of the launcher doesn't contain its bridge plugin."));
         using var copy = new MemoryStream();
         stream.CopyTo(copy);
         return copy.ToArray();

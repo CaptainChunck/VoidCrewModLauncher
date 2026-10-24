@@ -53,7 +53,7 @@ public static class LocalMods
             }
             else
             {
-                throw new FileNotFoundException("Nothing to add at " + path);
+                throw new FileNotFoundException(Loc.F("Nothing to add at {0}", path));
             }
 
             // A Thunderstore-style manifest names the mod better than its file name.

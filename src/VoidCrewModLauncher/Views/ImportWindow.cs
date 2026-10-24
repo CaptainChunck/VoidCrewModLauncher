@@ -20,7 +20,7 @@ public sealed class ImportWindow : Window
         var body = new StackPanel { Width = 640 };
         body.Children.Add(new TextBlock
         {
-            Text = $"Mods in {folder}",
+            Text = Loc.F("Mods in {0}", folder),
             Foreground = (Brush)Application.Current.Resources["TextSecondary"],
             FontSize = 13,
             TextWrapping = TextWrapping.Wrap,
@@ -37,7 +37,9 @@ public sealed class ImportWindow : Window
                 Margin = new Thickness(10, 8, 10, 4),
                 Content = new TextBlock
                 {
-                    Text = $"{candidate.Name}  v{candidate.Version}  ·  {candidate.Files.Count} file{(candidate.Files.Count == 1 ? "" : "s")}",
+                    Text = candidate.Files.Count == 1
+                        ? Loc.F("{0}  v{1}  ·  {2} file", candidate.Name, candidate.Version, candidate.Files.Count)
+                        : Loc.F("{0}  v{1}  ·  {2} files", candidate.Name, candidate.Version, candidate.Files.Count),
                     Foreground = Brushes.White,
                     FontSize = 14,
                     FontWeight = FontWeights.SemiBold,
@@ -49,8 +51,8 @@ public sealed class ImportWindow : Window
             if (candidate.Match != null)
             {
                 string name = "import" + group++;
-                fromThunderstore = Choice($"Install {candidate.Match.DisplayName} {candidate.Match.Latest?.VersionNumber} from Thunderstore (gets updates; other players can download it)", name);
-                RadioButton local = Choice("Copy these files as they are" + (candidate.LocalIsNewer ? " (newer than Thunderstore's)" : ""), name);
+                fromThunderstore = Choice(Loc.F("Install {0} {1} from Thunderstore (gets updates; other players can download it)", candidate.Match.DisplayName, candidate.Match.Latest?.VersionNumber), name);
+                RadioButton local = Choice(candidate.LocalIsNewer ? Loc.T("Copy these files as they are (newer than Thunderstore's)") : Loc.T("Copy these files as they are"), name);
                 (candidate.LocalIsNewer ? local : fromThunderstore).IsChecked = true;
                 row.Children.Add(fromThunderstore);
                 row.Children.Add(local);
@@ -59,7 +61,7 @@ public sealed class ImportWindow : Window
             {
                 row.Children.Add(new TextBlock
                 {
-                    Text = "Not on Thunderstore: copied as a local mod (other players would have to get it themselves).",
+                    Text = Loc.T("Not on Thunderstore: copied as a local mod (other players would have to get it themselves)."),
                     Foreground = (Brush)Application.Current.Resources["TextMuted"],
                     FontSize = 12,
                     Margin = new Thickness(36, 0, 10, 8),
@@ -72,18 +74,18 @@ public sealed class ImportWindow : Window
 
         body.Children.Add(new TextBlock
         {
-            Text = "Their settings files (BepInEx\\config) are copied too, unless the launcher already has them. The folder you import from isn't changed.",
+            Text = Loc.T("Their settings files (BepInEx\\config) are copied too, unless the launcher already has them. The folder you import from isn't changed."),
             Foreground = (Brush)Application.Current.Resources["TextMuted"],
             FontSize = 12.5,
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 8, 0, 0),
         });
 
-        Dialogs.Decorate(this, "Import mods", new ScrollViewer { Content = body, MaxHeight = 560, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }, out StackPanel buttons);
-        Button ok = Dialogs.MakeButton("IMPORT", ButtonKind.Primary);
+        Dialogs.Decorate(this, Loc.T("Import mods"), new ScrollViewer { Content = body, MaxHeight = 560, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }, out StackPanel buttons);
+        Button ok = Dialogs.MakeButton(Loc.T("IMPORT"), ButtonKind.Primary);
         ok.IsDefault = true;
         ok.Click += (_, _) => DialogResult = true;
-        Button cancel = Dialogs.MakeButton("CANCEL", ButtonKind.Normal);
+        Button cancel = Dialogs.MakeButton(Loc.T("CANCEL"), ButtonKind.Normal);
         cancel.IsCancel = true;
         buttons.Children.Add(ok);
         buttons.Children.Add(cancel);

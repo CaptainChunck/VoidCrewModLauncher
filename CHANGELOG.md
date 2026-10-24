@@ -1,5 +1,9 @@
 ﻿# Changelog
 
+## 0.8.0
+
+- **The launcher speaks 12 languages**, the same as Void Crew: English, French, German, Spanish, Italian, Polish, Portuguese (Brazil), Russian, Ukrainian, Chinese (Simplified), Japanese and Korean. It starts in your Windows language (English when that isn't one of them); LANGUAGE on the SETTINGS tab changes it and restarts the launcher. Mod names and descriptions stay as their authors wrote them, and the launcher's log stays in English.
+
 ## 0.7.4
 
 - **Fixed: the game started without mods when its folder had an old BepInEx loader** (Doorstop 3, from a manual BepInEx install). The launcher now puts its own loader in its place by itself when you start the game; the old files are kept next to it with .old-doorstop on the end.

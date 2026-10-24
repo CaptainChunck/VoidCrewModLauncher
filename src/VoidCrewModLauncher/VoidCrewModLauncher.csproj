@@ -23,6 +23,7 @@
        Shapes.Path in code, so take it back. -->
   <ItemGroup>
     <Using Include="System.IO" />
+    <Using Include="VoidCrewModLauncher.Core.Localization" />
   </ItemGroup>
 
   <ItemGroup>

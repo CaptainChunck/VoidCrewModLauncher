@@ -17,7 +17,7 @@ public partial class MainWindow : Window
     private void OnClosing(object? sender, CancelEventArgs e)
     {
         if (DataContext is not MainViewModel { IsBusy: true, ClosingForUpdate: false } model) return;
-        if (!model.Dialogs.Confirm("Close the launcher", "The launcher is still busy. Close it anyway?", "CLOSE")) e.Cancel = true;
+        if (!model.Dialogs.Confirm(Loc.T("Close the launcher"), Loc.T("The launcher is still busy. Close it anyway?"), Loc.T("CLOSE"))) e.Cancel = true;
     }
 
     private void OnWindowStateChanged()

@@ -37,7 +37,7 @@ public sealed class PackageStore
     /// <summary>Downloads and unpacks one version (from Thunderstore or GitHub) unless it's already in the store; returns its folder.</summary>
     public async Task<string> EnsureAsync(TsVersion version, IProgress<double>? progress = null, CancellationToken cancel = default)
     {
-        PackageReference reference = PackageReference.Parse(version.FullName) ?? throw new InvalidDataException($"Not a package version: {version.FullName}");
+        PackageReference reference = PackageReference.Parse(version.FullName) ?? throw new InvalidDataException(Loc.F("Not a package version: {0}", version.FullName));
         string target = VersionDirectory(reference.Id, version.VersionNumber);
         if (Directory.Exists(target)) return target;
         // Plugin DLLs from a GitHub release go into the files of a Thunderstore version, which is needed first.
@@ -77,7 +77,7 @@ public sealed class PackageStore
     /// </summary>
     private async Task AddFromGitHubAsync(PackageReference reference, TsVersion version, GitHubSource github, string target, IProgress<double>? progress, CancellationToken cancel)
     {
-        if (_github == null) throw new InvalidOperationException("GitHub downloads aren't available here.");
+        if (_github == null) throw new InvalidOperationException(Loc.T("GitHub downloads aren't available here."));
         AppLog.Info($"Downloading {version.FullName} from GitHub ({github.ReleaseUrl}).");
         if (github.Package != null)
         {
@@ -110,7 +110,7 @@ public sealed class PackageStore
                 if (same.Count == 0)
                 {
                     FileTools.DeleteDirectory(temp);
-                    throw new InvalidDataException($"{plugin.Name} in {github.Repo}'s release isn't a file of {reference.Id}; not using that release.");
+                    throw new InvalidDataException(Loc.F("{0} in {1}'s release isn't a file of {2}; not using that release.", plugin.Name, github.Repo, reference.Id));
                 }
                 foreach (string existing in same) FileTools.CopyFile(file, existing);
             }
@@ -127,18 +127,18 @@ public sealed class PackageStore
     private static void CheckManifest(string folder, PackageReference reference, TsVersion version)
     {
         string manifest = Path.Combine(folder, "manifest.json");
-        if (!File.Exists(manifest)) throw new InvalidDataException($"The GitHub release of {reference.Id} {version.VersionNumber} has no manifest.json; not using it.");
+        if (!File.Exists(manifest)) throw new InvalidDataException(Loc.F("The GitHub release of {0} {1} has no manifest.json; not using it.", reference.Id, version.VersionNumber));
         using JsonDocument document = JsonDocument.Parse(File.ReadAllText(manifest));
         JsonElement root = document.RootElement;
         string? name = root.TryGetProperty("name", out JsonElement n) && n.ValueKind == JsonValueKind.String ? n.GetString() : null;
         string? number = root.TryGetProperty("version_number", out JsonElement v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
         if (!string.Equals(name, reference.Name, StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidDataException($"The GitHub release's package is {name}, not {reference.Name}; not using it.");
+            throw new InvalidDataException(Loc.F("The GitHub release's package is {0}, not {1}; not using it.", name, reference.Name));
         }
         if (!VersionNumber.Same(number, version.VersionNumber))
         {
-            throw new InvalidDataException($"The GitHub release {version.VersionNumber} of {reference.Name} has a package saying {number}; not using it.");
+            throw new InvalidDataException(Loc.F("The GitHub release {0} of {1} has a package saying {2}; not using it.", version.VersionNumber, reference.Name, number));
         }
         if (root.TryGetProperty("dependencies", out JsonElement dependencies) && dependencies.ValueKind == JsonValueKind.Array)
         {
@@ -153,7 +153,7 @@ public sealed class PackageStore
         string actual = Convert.ToHexString(await System.Security.Cryptography.SHA256.HashDataAsync(stream, cancel)).ToLowerInvariant();
         if (actual != version.Sha256)
         {
-            throw new InvalidDataException($"{version.FullName} doesn't match the checksum its site lists; not installing it.");
+            throw new InvalidDataException(Loc.F("{0} doesn't match the checksum its site lists; not installing it.", version.FullName));
         }
     }
 
@@ -162,7 +162,7 @@ public sealed class PackageStore
     {
         if (!PluginScanner.ScanDirectory(folder).Any(p => p.Guid.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
         {
-            throw new InvalidDataException($"The GitHub release {version.VersionNumber} of {reference.Name} has no {prefix} plugin; not using it.");
+            throw new InvalidDataException(Loc.F("The GitHub release {0} of {1} has no {2} plugin; not using it.", version.VersionNumber, reference.Name, prefix));
         }
     }
 
@@ -202,7 +202,7 @@ public sealed class PackageStore
             foreach (ZipArchiveEntry entry in archive.Entries) declared += entry.Length;
             if (archive.Entries.Count > maxEntries || declared > maxBytes)
             {
-                throw new InvalidDataException($"{Path.GetFileName(zip)} is too big to be a mod ({archive.Entries.Count} files, {declared / (1024 * 1024)} MB); not installing it.");
+                throw new InvalidDataException(Loc.F("{0} is too big to be a mod ({1} files, {2} MB); not installing it.", Path.GetFileName(zip), archive.Entries.Count, declared / (1024 * 1024)));
             }
 
             Directory.CreateDirectory(temp);
@@ -218,7 +218,7 @@ public sealed class PackageStore
                     string destination = Path.GetFullPath(Path.Combine(temp, name));
                     if (!destination.StartsWith(root, StringComparison.OrdinalIgnoreCase))
                     {
-                        throw new InvalidDataException($"{Path.GetFileName(zip)} has a file that would be written outside its folder ({entry.FullName}); not installing it.");
+                        throw new InvalidDataException(Loc.F("{0} has a file that would be written outside its folder ({1}); not installing it.", Path.GetFileName(zip), entry.FullName));
                     }
                     if (name.EndsWith('/'))
                     {
@@ -234,7 +234,7 @@ public sealed class PackageStore
                         while ((read = input.Read(buffer, 0, buffer.Length)) > 0)
                         {
                             written += read;
-                            if (written > maxBytes) throw new InvalidDataException($"{Path.GetFileName(zip)} unpacks to more than {maxBytes / (1024 * 1024)} MB; not installing it.");
+                            if (written > maxBytes) throw new InvalidDataException(Loc.F("{0} unpacks to more than {1} MB; not installing it.", Path.GetFileName(zip), maxBytes / (1024 * 1024)));
                             output.Write(buffer, 0, read);
                         }
                     }

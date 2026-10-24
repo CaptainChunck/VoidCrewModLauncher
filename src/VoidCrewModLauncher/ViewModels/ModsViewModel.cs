@@ -14,7 +14,11 @@ namespace VoidCrewModLauncher.ViewModels;
 /// <summary>The MODS page: INSTALLED (your library, with the on/off switches) and BROWSE (Thunderstore).</summary>
 public partial class ModsViewModel : ObservableObject
 {
-    public static readonly string[] SortOptions = { "Most downloaded", "Top rated", "Recently updated", "Newest", "Name" };
+    /// <summary>The BROWSE sort choices as shown (translated); <see cref="ApplySort"/> goes by their position.</summary>
+    public static string[] SortOptions => new[] { Loc.T("Most downloaded"), Loc.T("Top rated"), Loc.T("Recently updated"), Loc.T("Newest"), Loc.T("Name") };
+
+    /// <summary>The first category choice: no category filter.</summary>
+    public static string AllCategories => Loc.T("All categories");
 
     private readonly MainViewModel _main;
     private readonly ObservableCollection<InstalledModViewModel> _installed = new();
@@ -36,13 +40,13 @@ public partial class ModsViewModel : ObservableObject
 
     public ICollectionView InstalledView { get; }
     public ICollectionView OnlineView { get; }
-    public ObservableCollection<string> Categories { get; } = new() { "All categories" };
-    public IReadOnlyList<string> Sorts => SortOptions;
+    public ObservableCollection<string> Categories { get; } = new() { AllCategories };
+    public IReadOnlyList<string> Sorts { get; } = SortOptions;
 
     [ObservableProperty] private bool showBrowse;
     [ObservableProperty] private string installedSearch = "";
     [ObservableProperty] private string onlineSearch = "";
-    [ObservableProperty] private string category = "All categories";
+    [ObservableProperty] private string category = AllCategories;
     [ObservableProperty] private string sort = SortOptions[0];
     [ObservableProperty] private bool showDeprecated;
     [ObservableProperty] private PackageViewModel? selectedPackage;
@@ -50,9 +54,9 @@ public partial class ModsViewModel : ObservableObject
     [ObservableProperty] private int updateCount;
     [ObservableProperty] private int installedCount;
     [ObservableProperty] private int enabledCount;
-    [ObservableProperty] private string bepInExText = "BepInEx: not downloaded yet";
+    [ObservableProperty] private string bepInExText = Loc.T("BepInEx: not downloaded yet");
 
-    public string UpdateAllText => UpdateCount == 0 ? "UP TO DATE" : $"UPDATE ALL ({UpdateCount})";
+    public string UpdateAllText => UpdateCount == 0 ? Loc.T("UP TO DATE") : Loc.F("UPDATE ALL ({0})", UpdateCount);
 
     private static bool Matches(string search, string text) => string.IsNullOrWhiteSpace(search) || text.Contains(search.Trim(), StringComparison.OrdinalIgnoreCase);
 
@@ -86,7 +90,7 @@ public partial class ModsViewModel : ObservableObject
         InstalledCount = mods.Count;
         EnabledCount = mods.Count(m => m.Enabled);
         string? bepInEx = service.Store.Versions(PackageIndex.BepInExPackId).OrderByDescending(v => v, VersionNumber.Comparer).FirstOrDefault();
-        BepInExText = bepInEx == null ? "BepInEx: not downloaded yet" : $"BepInEx {bepInEx}";
+        BepInExText = bepInEx == null ? Loc.T("BepInEx: not downloaded yet") : $"BepInEx {bepInEx}";
         OnPropertyChanged(nameof(UpdateAllText));
         InstalledView.Refresh();
         foreach (PackageViewModel package in _online) package.Installed = service.Library.Find(package.Id);
@@ -119,7 +123,7 @@ public partial class ModsViewModel : ObservableObject
         ModManager mods = _main.Service.Mods;
         if (!enabled)
         {
-            string what = $"Turning off {row.Name}";
+            string what = Loc.F("Turning off {0}", row.Name);
             if (!_main.CheckIdle(what))
             {
                 row.ResetEnabled(true);
@@ -129,10 +133,12 @@ public partial class ModsViewModel : ObservableObject
             bool alsoDependents = false;
             if (dependents.Count > 0)
             {
-                int choice = _main.Dialogs.Ask("Other mods need it",
-                    $"{string.Join(", ", dependents.Select(d => d.DisplayName))} need{(dependents.Count == 1 ? "s" : "")} {row.Name}. " +
-                    "While they're on, the launcher still loads it for them.\n\nTurn them off too?",
-                    new DialogButton("TURN THEM OFF TOO", ButtonKind.Primary), new DialogButton("ONLY THIS ONE"), new DialogButton("CANCEL"));
+                string names = string.Join(", ", dependents.Select(d => d.DisplayName));
+                int choice = _main.Dialogs.Ask(Loc.T("Other mods need it"),
+                    dependents.Count == 1
+                        ? Loc.F("{0} needs {1}. While they're on, the launcher still loads it for them.\n\nTurn them off too?", names, row.Name)
+                        : Loc.F("{0} need {1}. While they're on, the launcher still loads it for them.\n\nTurn them off too?", names, row.Name),
+                    new DialogButton(Loc.T("TURN THEM OFF TOO"), ButtonKind.Primary), new DialogButton(Loc.T("ONLY THIS ONE")), new DialogButton(Loc.T("CANCEL")));
                 if (choice == 2 || choice < 0)
                 {
                     row.ResetEnabled(true);
@@ -149,37 +155,40 @@ public partial class ModsViewModel : ObservableObject
                 await mods.SetEnabledAsync(row.Id, false);
             });
             if (!off) row.ResetEnabled(true);
-            else _main.SetStatus($"{row.Name} is off. It isn't loaded when you play or host.");
+            else _main.SetStatus(Loc.F("{0} is off. It isn't loaded when you play or host.", row.Name));
             return;
         }
-        bool ok = await _main.RunAsync($"Turning on {row.Name}", () => _main.Service.SetModEnabledAsync(row.Id, true, new SyncProgress<InstallStatus>(s => _main.OnUi(() => _main.SetStatus(s.Message, s.Fraction)))));
+        bool ok = await _main.RunAsync(Loc.F("Turning on {0}", row.Name), () => _main.Service.SetModEnabledAsync(row.Id, true, new SyncProgress<InstallStatus>(s => _main.OnUi(() => _main.SetStatus(s.Message, s.Fraction)))));
         if (!ok) row.ResetEnabled(false);
-        else _main.SetStatus($"{row.Name} is on.");
+        else _main.SetStatus(Loc.F("{0} is on.", row.Name));
     }
 
     [RelayCommand]
     private Task Update(InstalledModViewModel row) =>
-        _main.RunAsync($"Updating {row.Name}", () => _main.Service.UpdateModAsync(row.Id, Progress()));
+        _main.RunAsync(Loc.F("Updating {0}", row.Name), () => _main.Service.UpdateModAsync(row.Id, Progress()));
 
     private bool CanUpdateAll() => UpdateCount > 0;
 
     [RelayCommand(CanExecute = nameof(CanUpdateAll))]
     private async Task UpdateAll()
     {
-        if (await _main.UpdateModsAsync() == null) _main.SetStatus("Your mods are up to date.");
+        if (await _main.UpdateModsAsync() == null) _main.SetStatus(Loc.T("Your mods are up to date."));
     }
 
     [RelayCommand]
     private void Uninstall(InstalledModViewModel row)
     {
-        if (!_main.CheckIdle($"Removing {row.Name}")) return;
+        if (!_main.CheckIdle(Loc.F("Removing {0}", row.Name))) return;
         List<InstalledMod> dependents = _main.Service.EnabledDependents(row.Id);
-        string warning = dependents.Count > 0 ? $"\n\n{string.Join(", ", dependents.Select(d => d.DisplayName))} need it, so the launcher will download it again for them." : "";
-        if (!_main.Dialogs.Confirm("Remove mod", $"Remove {row.Name} {row.Version} from the launcher?{warning}\n\nIts settings file (BepInEx\\config) is kept.", "REMOVE")) return;
+        string question = dependents.Count > 0
+            ? Loc.F("Remove {0} {1} from the launcher?\n\n{2} need it, so the launcher will download it again for them.\n\nIts settings file (BepInEx\\config) is kept.",
+                row.Name, row.Version, string.Join(", ", dependents.Select(d => d.DisplayName)))
+            : Loc.F("Remove {0} {1} from the launcher?\n\nIts settings file (BepInEx\\config) is kept.", row.Name, row.Version);
+        if (!_main.Dialogs.Confirm(Loc.T("Remove mod"), question, Loc.T("REMOVE"))) return;
         // Something may have started while the question was up.
-        if (!_main.CheckIdle($"Removing {row.Name}")) return;
+        if (!_main.CheckIdle(Loc.F("Removing {0}", row.Name))) return;
         _main.Service.Mods.Uninstall(row.Id);
-        _main.SetStatus($"Removed {row.Name}.");
+        _main.SetStatus(Loc.F("Removed {0}.", row.Name));
     }
 
     [RelayCommand]
@@ -203,34 +212,34 @@ public partial class ModsViewModel : ObservableObject
     [RelayCommand]
     private void AddLocal()
     {
-        if (!_main.CheckIdle("Adding a mod")) return;
-        string? file = _main.Dialogs.PickFile("Add a mod from your PC", "Mods (*.dll;*.zip)|*.dll;*.zip|All files|*.*");
+        if (!_main.CheckIdle(Loc.T("Adding a mod"))) return;
+        string? file = _main.Dialogs.PickFile(Loc.T("Add a mod from your PC"), Loc.T("Mods (*.dll;*.zip)|*.dll;*.zip|All files|*.*"));
         if (file == null) return;
         try
         {
             InstalledMod mod = LocalMods.Add(_main.Service.Mods, file);
-            _main.SetStatus($"Added {mod.DisplayName} {mod.Version}. It's on.");
+            _main.SetStatus(Loc.F("Added {0} {1}. It's on.", mod.DisplayName, mod.Version));
         }
         catch (Exception e)
         {
-            _main.Dialogs.Error("Couldn't add the mod", e.Message);
+            _main.Dialogs.Error(Loc.T("Couldn't add the mod"), e.Message);
         }
     }
 
     [RelayCommand]
     private async Task Import()
     {
-        string? folder = _main.Dialogs.PickFolder("Choose a BepInEx folder to import from", GuessImportFolder());
+        string? folder = _main.Dialogs.PickFolder(Loc.T("Choose a BepInEx folder to import from"), GuessImportFolder());
         if (folder == null) return;
         List<ImportCandidate> candidates = LocalMods.Scan(folder, _main.Service.Index);
         if (candidates.Count == 0)
         {
-            _main.Dialogs.Info("Nothing to import", $"No mods in {folder}. Choose the BepInEx folder (the one with plugins in it).");
+            _main.Dialogs.Info(Loc.T("Nothing to import"), Loc.F("No mods in {0}. Choose the BepInEx folder (the one with plugins in it).", folder));
             return;
         }
         List<(ImportCandidate Candidate, bool FromThunderstore)>? picked = _main.Dialogs.PickImports(candidates, folder);
         if (picked == null || picked.Count == 0) return;
-        await _main.RunAsync("Importing mods", async () =>
+        await _main.RunAsync(Loc.T("Importing mods"), async () =>
         {
             foreach ((ImportCandidate candidate, bool fromThunderstore) in picked)
             {
@@ -238,7 +247,13 @@ public partial class ModsViewModel : ObservableObject
                 else LocalMods.Import(_main.Service.Mods, candidate);
             }
             int configs = LocalMods.CopyMissingConfigs(folder, _main.Service.Paths.RuntimeBepInEx);
-            _main.SetStatus($"Imported {picked.Count} mod{(picked.Count == 1 ? "" : "s")}" + (configs > 0 ? $" and {configs} settings files." : "."));
+            _main.SetStatus((picked.Count == 1, configs > 0) switch
+            {
+                (true, true) => Loc.F("Imported {0} mod and {1} settings files.", picked.Count, configs),
+                (true, false) => Loc.F("Imported {0} mod.", picked.Count),
+                (false, true) => Loc.F("Imported {0} mods and {1} settings files.", picked.Count, configs),
+                (false, false) => Loc.F("Imported {0} mods.", picked.Count),
+            });
         });
     }
 
@@ -274,9 +289,9 @@ public partial class ModsViewModel : ObservableObject
         string current = Category;
         var categories = service.Index.Mods.SelectMany(p => p.Categories).Where(c => c != "Mods").Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(c => c).ToList();
         Categories.Clear();
-        Categories.Add("All categories");
+        Categories.Add(AllCategories);
         foreach (string category in categories) Categories.Add(category);
-        Category = Categories.Contains(current) ? current : "All categories";
+        Category = Categories.Contains(current) ? current : AllCategories;
         OnlineView.Refresh();
         SelectedPackage = _online.FirstOrDefault(p => p.Id == selected);
     }
@@ -285,7 +300,7 @@ public partial class ModsViewModel : ObservableObject
     {
         if (item is not PackageViewModel package) return false;
         if (!ShowDeprecated && package.IsDeprecated) return false;
-        if (Category != "All categories" && !package.Package.Categories.Contains(Category, StringComparer.OrdinalIgnoreCase)) return false;
+        if (Category != AllCategories && !package.Package.Categories.Contains(Category, StringComparer.OrdinalIgnoreCase)) return false;
         return Matches(OnlineSearch, $"{package.Name} {package.Package.Owner} {package.Description}");
     }
 
@@ -297,12 +312,12 @@ public partial class ModsViewModel : ObservableObject
     private void ApplySort()
     {
         OnlineView.SortDescriptions.Clear();
-        OnlineView.SortDescriptions.Add(Sort switch
+        OnlineView.SortDescriptions.Add(Array.IndexOf(SortOptions, Sort) switch
         {
-            "Top rated" => new SortDescription(nameof(PackageViewModel.Rating), ListSortDirection.Descending),
-            "Recently updated" => new SortDescription(nameof(PackageViewModel.Updated), ListSortDirection.Descending),
-            "Newest" => new SortDescription(nameof(PackageViewModel.Created), ListSortDirection.Descending),
-            "Name" => new SortDescription(nameof(PackageViewModel.Name), ListSortDirection.Ascending),
+            1 => new SortDescription(nameof(PackageViewModel.Rating), ListSortDirection.Descending),
+            2 => new SortDescription(nameof(PackageViewModel.Updated), ListSortDirection.Descending),
+            3 => new SortDescription(nameof(PackageViewModel.Created), ListSortDirection.Descending),
+            4 => new SortDescription(nameof(PackageViewModel.Name), ListSortDirection.Ascending),
             _ => new SortDescription(nameof(PackageViewModel.DownloadCount), ListSortDirection.Descending),
         });
     }
@@ -363,12 +378,12 @@ public partial class ModsViewModel : ObservableObject
             ShowBrowse = false;
             return Task.CompletedTask;
         }
-        return _main.RunAsync($"Installing {package.Name}", async () =>
+        return _main.RunAsync(Loc.F("Installing {0}", package.Name), async () =>
         {
             if (package.HasUpdate) await _main.Service.UpdateModAsync(package.Id, Progress());
             else await _main.Service.InstallModAsync(package.Id, Progress());
             string version = _main.Service.Library.Find(package.Id)?.Version ?? package.LatestVersion;
-            _main.SetStatus($"{package.Name} {version} is installed and on. It loads the next time you play or host.");
+            _main.SetStatus(Loc.F("{0} {1} is installed and on. It loads the next time you play or host.", package.Name, version));
         });
     }
 
@@ -381,7 +396,7 @@ public partial class ModsViewModel : ObservableObject
     [RelayCommand]
     private async Task RefreshOnlineList()
     {
-        if (!await _main.RunAsync("Refreshing Thunderstore's mod list", () => _main.Service.RefreshPackagesAsync(true))) return;
+        if (!await _main.RunAsync(Loc.T("Refreshing Thunderstore's mod list"), () => _main.Service.RefreshPackagesAsync(true))) return;
         if (_main.Service.Settings.AutoUpdateMods) await _main.UpdateModsAsync();
     }
 

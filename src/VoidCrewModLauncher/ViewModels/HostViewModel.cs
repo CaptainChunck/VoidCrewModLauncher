@@ -26,10 +26,10 @@ public partial class HostModViewModel : ObservableObject
         ModNeed guess = mod.GuessedNeed;
         Options = new List<NeedOption>
         {
-            new(null, $"Auto: {Describe(guess)}"),
-            new(ModNeed.Everyone, "Everyone needs it"),
-            new(ModNeed.HostOnly, "Only the host runs it"),
-            new(ModNeed.ClientOnly, "Client-side (my own game only)"),
+            new(null, Loc.F("Auto: {0}", Describe(guess))),
+            new(ModNeed.Everyone, Loc.T("Everyone needs it")),
+            new(ModNeed.HostOnly, Loc.T("Only the host runs it")),
+            new(ModNeed.ClientOnly, Loc.T("Client-side (my own game only)")),
         };
         selected = Options.FirstOrDefault(o => o.Need == chosen) ?? Options[0];
     }
@@ -37,7 +37,7 @@ public partial class HostModViewModel : ObservableObject
     public InstalledMod Mod { get; }
     public string Name => Mod.DisplayName;
     public string Version => "v" + Mod.Version;
-    public string Author => Mod.IsLocal ? "your PC" : Mod.Author.Replace('_', ' ');
+    public string Author => Mod.IsLocal ? Loc.T("your PC") : Mod.Author.Replace('_', ' ');
     public IReadOnlyList<NeedOption> Options { get; }
 
     [ObservableProperty] private NeedOption selected;
@@ -54,10 +54,10 @@ public partial class HostModViewModel : ObservableObject
 
     private static string Describe(ModNeed need) => need switch
     {
-        ModNeed.Everyone => "everyone needs it",
-        ModNeed.HostOnly or ModNeed.Session => "only the host",
-        ModNeed.ClientOnly => "client-side",
-        _ => "probably everyone",
+        ModNeed.Everyone => Loc.T("everyone needs it"),
+        ModNeed.HostOnly or ModNeed.Session => Loc.T("only the host"),
+        ModNeed.ClientOnly => Loc.T("client-side"),
+        _ => Loc.T("probably everyone"),
     };
 }
 
@@ -166,27 +166,29 @@ public partial class HostViewModel : ObservableObject
         Save();
         var command = new HostCommand { Name = LobbyName.Trim(), IsPublic = IsPublic, MaxPlayers = MaxPlayers, CrossPlay = CrossPlay };
         LauncherService service = _main.Service;
-        await _main.RunAsync("Hosting your lobby", async () =>
+        await _main.RunAsync(Loc.T("Hosting your lobby"), async () =>
         {
             StateMessage? state = service.Bridge.State;
             if (state is { Phase: "menu", InLobby: true } && await service.RunningGameHasPlayModsAsync())
             {
                 await service.Bridge.SendAsync(command);
-                _main.SetStatus("Opening your lobby...");
+                _main.SetStatus(Loc.T("Opening your lobby..."));
                 return;
             }
             if (GameProcess.IsRunning())
             {
-                string why = state?.Phase is "hub" or "mission" ? "You're in a game right now. " : "";
-                if (!_main.Dialogs.Confirm("Restart Void Crew", why + "Void Crew restarts with your enabled mods and opens your lobby. Continue?", "RESTART AND HOST"))
+                string question = state?.Phase is "hub" or "mission"
+                    ? Loc.T("You're in a game right now. Void Crew restarts with your enabled mods and opens your lobby. Continue?")
+                    : Loc.T("Void Crew restarts with your enabled mods and opens your lobby. Continue?");
+                if (!_main.Dialogs.Confirm(Loc.T("Restart Void Crew"), question, Loc.T("RESTART AND HOST")))
                 {
-                    _main.SetStatus("Cancelled.");
+                    _main.SetStatus(Loc.T("Cancelled."));
                     return;
                 }
-                if (!await _main.CloseGameOrAskAsync()) throw new InvalidOperationException("Void Crew is still running.");
+                if (!await _main.CloseGameOrAskAsync()) throw new InvalidOperationException(Loc.T("Void Crew is still running."));
             }
             await service.LaunchAsync(LaunchMode.Host, command);
-            _main.SetStatus("Void Crew is starting; it opens your lobby as soon as the main menu is ready.");
+            _main.SetStatus(Loc.T("Void Crew is starting; it opens your lobby as soon as the main menu is ready."));
         });
     }
 
@@ -194,12 +196,12 @@ public partial class HostViewModel : ObservableObject
     {
         if (result.Ok)
         {
-            _main.SetStatus("Your lobby is open. Other launcher users see your mods in their server browser.");
+            _main.SetStatus(Loc.T("Your lobby is open. Other launcher users see your mods in their server browser."));
             using var game = GameProcess.Find();
             if (game != null) GameProcess.Focus(game.Id);
             return;
         }
-        _main.SetStatus("Hosting failed.");
-        _main.Dialogs.Error("Couldn't host", result.Error ?? "Void Crew couldn't open the lobby.");
+        _main.SetStatus(Loc.T("Hosting failed."));
+        _main.Dialogs.Error(Loc.T("Couldn't host"), result.Error ?? Loc.T("Void Crew couldn't open the lobby."));
     }
 }

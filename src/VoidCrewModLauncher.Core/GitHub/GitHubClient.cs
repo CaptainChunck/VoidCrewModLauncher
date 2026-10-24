@@ -383,7 +383,7 @@ public sealed class GitHubClient : IDisposable
         if ((asset.Size > 0 && done != asset.Size) || (asset.Sha256 != null && actual != asset.Sha256))
         {
             File.Delete(target);
-            throw new InvalidDataException($"{asset.Name} from GitHub doesn't match the size or checksum GitHub lists for it.");
+            throw new InvalidDataException(Loc.F("{0} from GitHub doesn't match the size or checksum GitHub lists for it.", asset.Name));
         }
         progress?.Report(1.0);
         return target;

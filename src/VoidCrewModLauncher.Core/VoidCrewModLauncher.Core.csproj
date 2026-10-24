@@ -20,6 +20,12 @@
   <ItemGroup>
     <EmbeddedResource Include="..\VoidCrewModLauncher.Bridge\bin\$(Configuration)\net48\VoidCrewModLauncher.Bridge.dll" LogicalName="VoidCrewModLauncher.Bridge.dll" Visible="false" />
   </ItemGroup>
+  <!-- Translations: Localization/<code>.json, a flat object { "English text": "translation" } (see Loc). keys.json is the
+       list of every English key, made by tools/extract-strings.ps1 for translators; it isn't shipped. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Localization\*.json" Exclude="Localization\keys.json" LogicalName="Localization/%(Filename).json" />
+    <Using Include="VoidCrewModLauncher.Core.Localization" />
+  </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="VoidCrewModLauncher.Tests" />
   </ItemGroup>

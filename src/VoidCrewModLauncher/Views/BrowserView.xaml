@@ -1,6 +1,7 @@
 <UserControl x:Class="VoidCrewModLauncher.Views.BrowserView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:i="clr-namespace:VoidCrewModLauncher.Infrastructure"
              xmlns:c="clr-namespace:VoidCrewModLauncher.Controls">
     <UserControl.Resources>
         <!-- Badges stay readable on the dark rows and on the orange/white hover and selection. -->
@@ -87,23 +88,23 @@
         <HeaderedContentControl Style="{StaticResource Section}">
             <HeaderedContentControl.Header>
                 <DockPanel LastChildFill="False">
-                    <c:SpacedText Value="LOBBIES" Style="{StaticResource H1}" DockPanel.Dock="Left" />
-                    <Button DockPanel.Dock="Right" Style="{StaticResource SmallButton}" Content="REFRESH" Command="{Binding RefreshCommand}" VerticalAlignment="Center" Margin="8,0,0,0" />
+                    <c:SpacedText Value="{i:T LOBBIES}" Style="{StaticResource H1}" DockPanel.Dock="Left" />
+                    <Button DockPanel.Dock="Right" Style="{StaticResource SmallButton}" Content="{i:T REFRESH}" Command="{Binding RefreshCommand}" VerticalAlignment="Center" Margin="8,0,0,0" />
                     <ComboBox DockPanel.Dock="Right" Width="210" VerticalAlignment="Center" ItemsSource="{Binding Regions}" SelectedItem="{Binding SelectedRegion}"
                               DisplayMemberPath="Label"
                               Visibility="{Binding Regions.Count, Converter={StaticResource Show}}" />
-                    <TextBlock DockPanel.Dock="Right" Text="REGION" Style="{StaticResource Label}" VerticalAlignment="Center" Margin="0,0,8,0"
+                    <TextBlock DockPanel.Dock="Right" Text="{i:T REGION}" Style="{StaticResource Label}" VerticalAlignment="Center" Margin="0,0,8,0"
                                Visibility="{Binding Regions.Count, Converter={StaticResource Show}}" />
                 </DockPanel>
             </HeaderedContentControl.Header>
 
             <DockPanel>
                 <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,10">
-                    <TextBox Width="300" Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" Tag="Search lobbies, hosts, ships, mods" Margin="0,0,12,6" />
-                    <ToggleButton Style="{StaticResource Chip}" Content="HIDE FULL" IsChecked="{Binding HideFull}" Margin="0,0,6,6" />
-                    <ToggleButton Style="{StaticResource Chip}" Content="IN HUB ONLY" IsChecked="{Binding OnlyInHub}" Margin="0,0,6,6" />
-                    <ToggleButton Style="{StaticResource Chip}" Content="MODDED ONLY" IsChecked="{Binding HideVanilla}" Margin="0,0,6,6" />
-                    <ToggleButton Style="{StaticResource Chip}" Content="VANILLA ONLY" IsChecked="{Binding HideModded}" Margin="0,0,6,6" />
+                    <TextBox Width="300" Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" Tag="{i:T 'Search lobbies, hosts, ships, mods'}" Margin="0,0,12,6" />
+                    <ToggleButton Style="{StaticResource Chip}" Content="{i:T HIDE FULL}" IsChecked="{Binding HideFull}" Margin="0,0,6,6" />
+                    <ToggleButton Style="{StaticResource Chip}" Content="{i:T IN HUB ONLY}" IsChecked="{Binding OnlyInHub}" Margin="0,0,6,6" />
+                    <ToggleButton Style="{StaticResource Chip}" Content="{i:T MODDED ONLY}" IsChecked="{Binding HideVanilla}" Margin="0,0,6,6" />
+                    <ToggleButton Style="{StaticResource Chip}" Content="{i:T VANILLA ONLY}" IsChecked="{Binding HideModded}" Margin="0,0,6,6" />
                 </WrapPanel>
 
                 <TextBlock DockPanel.Dock="Top" Text="{Binding Banner}" Style="{StaticResource Muted}" Margin="2,0,0,8"
@@ -120,12 +121,12 @@
                         <ColumnDefinition Width="150" />
                         <ColumnDefinition Width="104" />
                     </Grid.ColumnDefinitions>
-                    <TextBlock Text="LOBBY" Style="{StaticResource Label}" />
-                    <TextBlock Grid.Column="1" Text="HOST" Style="{StaticResource Label}" />
-                    <TextBlock Grid.Column="2" Text="CREW" Style="{StaticResource Label}" />
-                    <TextBlock Grid.Column="3" Text="WHERE" Style="{StaticResource Label}" />
-                    <TextBlock Grid.Column="4" Text="MODS" Style="{StaticResource Label}" />
-                    <TextBlock Grid.Column="5" Text="YOU" Style="{StaticResource Label}" />
+                    <TextBlock Text="{i:T LOBBY}" Style="{StaticResource Label}" />
+                    <TextBlock Grid.Column="1" Text="{i:T HOST}" Style="{StaticResource Label}" />
+                    <TextBlock Grid.Column="2" Text="{i:T CREW}" Style="{StaticResource Label}" />
+                    <TextBlock Grid.Column="3" Text="{i:T WHERE}" Style="{StaticResource Label}" />
+                    <TextBlock Grid.Column="4" Text="{i:T MODS}" Style="{StaticResource Label}" />
+                    <TextBlock Grid.Column="5" Text="{i:T YOU}" Style="{StaticResource Label}" />
                 </Grid>
                 </Border>
 
@@ -174,11 +175,11 @@
                                 <Border Width="44" Height="3" Background="{StaticResource Orange}" HorizontalAlignment="Center" />
                             </Grid>
                             <TextBlock Text="{Binding OverlayText}" Style="{StaticResource Body}" TextAlignment="Center" />
-                            <Button Style="{StaticResource LargeButton}" Content="START VOID CREW" Command="{Binding StartGameCommand}" HorizontalAlignment="Center" Margin="0,20,0,0"
+                            <Button Style="{StaticResource LargeButton}" Content="{i:T START VOID CREW}" Command="{Binding StartGameCommand}" HorizontalAlignment="Center" Margin="0,20,0,0"
                                     Visibility="{Binding ShowStartButton, Converter={StaticResource Show}}" />
-                            <CheckBox Content="Keep the launcher in front while I browse" IsChecked="{Binding MinimizeWhenBrowsing}" HorizontalAlignment="Center" Margin="0,14,0,0"
+                            <CheckBox Content="{i:T Keep the launcher in front while I browse}" IsChecked="{Binding MinimizeWhenBrowsing}" HorizontalAlignment="Center" Margin="0,14,0,0"
                                       Visibility="{Binding ShowStartButton, Converter={StaticResource Show}}" />
-                            <Button Style="{StaticResource PrimaryButton}" Content="RESTART FROM THE LAUNCHER" Command="{Binding RestartFromLauncherCommand}" HorizontalAlignment="Center" Margin="0,20,0,0"
+                            <Button Style="{StaticResource PrimaryButton}" Content="{i:T RESTART FROM THE LAUNCHER}" Command="{Binding RestartFromLauncherCommand}" HorizontalAlignment="Center" Margin="0,20,0,0"
                                     Visibility="{Binding ShowRestartButton, Converter={StaticResource Show}}" />
                             <ContentControl Style="{StaticResource PanelFooter}" />
                         </StackPanel>
@@ -191,26 +192,32 @@
         <c:ShapeBorder Grid.Column="2" Style="{StaticResource DarkPanel}" Padding="18,16">
             <Grid>
                 <StackPanel VerticalAlignment="Center" Visibility="{Binding Selected, Converter={StaticResource Hide}}" Margin="10,0">
-                    <TextBlock Text="PICK A LOBBY" Style="{StaticResource H2}" Foreground="White" HorizontalAlignment="Center" />
+                    <TextBlock Text="{i:T PICK A LOBBY}" Style="{StaticResource H2}" Foreground="White" HorizontalAlignment="Center" />
                 </StackPanel>
 
                 <DockPanel DataContext="{Binding Selected}" Visibility="{Binding Converter={StaticResource Show}}">
                     <StackPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
-                        <Button Style="{StaticResource LargeButton}" Content="JOIN" HorizontalAlignment="Stretch"
+                        <Button Style="{StaticResource LargeButton}" Content="{i:T JOIN}" HorizontalAlignment="Stretch"
                                 Command="{Binding DataContext.JoinCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" />
                     </StackPanel>
 
                     <StackPanel DockPanel.Dock="Top">
                         <TextBlock Text="{Binding Name}" Style="{StaticResource H2}" Foreground="White" FontSize="21" TextWrapping="Wrap" />
                         <TextBlock Margin="0,2,0,8" Style="{StaticResource Muted}">
-                            <Run Text="hosted by" /> <Run Text="{Binding Host, Mode=OneWay}" Foreground="White" /> <Run Text="·" /> <Run Text="{Binding Region, Mode=OneWay}" />
+                            <Run>
+                                <Run.Text>
+                                    <MultiBinding StringFormat="{i:T 'hosted by \{0\}'}" Mode="OneWay">
+                                        <Binding Path="Host" />
+                                    </MultiBinding>
+                                </Run.Text>
+                            </Run> <Run Text="·" /> <Run Text="{Binding Region, Mode=OneWay}" />
                         </TextBlock>
                         <WrapPanel Margin="0,0,0,10">
                             <Border Style="{StaticResource Badge}" BorderBrush="#FF8000" Visibility="{Binding ModdingTag, Converter={StaticResource Show}}">
                                 <TextBlock Text="{Binding ModdingTag}" Style="{StaticResource BadgeText}" Foreground="#FF8000" />
                             </Border>
                             <Border Style="{StaticResource Badge}" BorderBrush="{StaticResource LightGrey}" Visibility="{Binding CrossPlay, Converter={StaticResource Show}}">
-                                <TextBlock Text="CROSSPLAY" Style="{StaticResource BadgeText}" Foreground="{StaticResource TextSecondary}" />
+                                <TextBlock Text="{i:T CROSSPLAY}" Style="{StaticResource BadgeText}" Foreground="{StaticResource TextSecondary}" />
                             </Border>
                         </WrapPanel>
 
@@ -227,21 +234,21 @@
                                 <RowDefinition />
                                 <RowDefinition />
                             </Grid.RowDefinitions>
-                            <TextBlock Grid.Row="0" Text="CREW" Style="{StaticResource InfoLabel}" />
+                            <TextBlock Grid.Row="0" Text="{i:T CREW}" Style="{StaticResource InfoLabel}" />
                             <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Players}" Style="{StaticResource InfoValue}" />
-                            <TextBlock Grid.Row="1" Text="WHERE" Style="{StaticResource InfoLabel}" />
+                            <TextBlock Grid.Row="1" Text="{i:T WHERE}" Style="{StaticResource InfoLabel}" />
                             <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Where}" Style="{StaticResource InfoValue}" />
-                            <TextBlock Grid.Row="2" Text="SHIP" Style="{StaticResource InfoLabel}" />
+                            <TextBlock Grid.Row="2" Text="{i:T SHIP}" Style="{StaticResource InfoLabel}" />
                             <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding Ship}" Style="{StaticResource InfoValue}" />
-                            <TextBlock Grid.Row="3" Text="SECTOR" Style="{StaticResource InfoLabel}" />
+                            <TextBlock Grid.Row="3" Text="{i:T SECTOR}" Style="{StaticResource InfoLabel}" />
                             <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding Sector}" Style="{StaticResource InfoValue}" />
-                            <TextBlock Grid.Row="4" Text="MUTATORS" Style="{StaticResource InfoLabel}" />
+                            <TextBlock Grid.Row="4" Text="{i:T MUTATORS}" Style="{StaticResource InfoLabel}" />
                             <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding Mutators}" Style="{StaticResource InfoValue}" />
-                            <TextBlock Grid.Row="5" Text="RANK" Style="{StaticResource InfoLabel}" />
+                            <TextBlock Grid.Row="5" Text="{i:T RANK}" Style="{StaticResource InfoLabel}" />
                             <TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding Rank}" Style="{StaticResource InfoValue}" />
                         </Grid>
 
-                        <c:SpacedText Value="MODS" Style="{StaticResource H1}" FontSize="15" Margin="0,16,0,0" HorizontalAlignment="Left" />
+                        <c:SpacedText Value="{i:T MODS}" Style="{StaticResource H1}" FontSize="15" Margin="0,16,0,0" HorizontalAlignment="Left" />
                         <Grid Margin="0,6,0,10" Height="3">
                             <Border Height="1" Background="{StaticResource Line}" VerticalAlignment="Center" Opacity="0.7" />
                             <Border Width="34" Height="3" Background="{StaticResource Orange}" HorizontalAlignment="Left" />
@@ -251,7 +258,7 @@
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <StackPanel>
                             <TextBlock Style="{StaticResource Muted}" Visibility="{Binding HasMods, Converter={StaticResource Hide}}"
-                                       Text="No mods listed. If the lobby is vanilla, anyone can join; your client-side mods stay on." />
+                                       Text="{i:T 'No mods listed. If the lobby is vanilla, anyone can join; your client-side mods stay on.'}" />
                             <ItemsControl ItemsSource="{Binding Mods}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>

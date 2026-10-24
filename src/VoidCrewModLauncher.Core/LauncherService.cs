@@ -27,7 +27,7 @@ public enum LaunchMode
 
 /// <summary>The player has to agree before the launcher adds BepInEx's loader to the game folder.</summary>
 public sealed class DoorstopConsentNeededException(string gameDirectory)
-    : Exception($"The launcher needs to add BepInEx's loader (winhttp.dll and doorstop_config.ini) to {gameDirectory}.")
+    : Exception(Loc.F("The launcher needs to add BepInEx's loader (winhttp.dll and doorstop_config.ini) to {0}.", gameDirectory))
 {
     public string GameDirectory { get; } = gameDirectory;
 }
@@ -347,7 +347,7 @@ public sealed class LauncherService : IDisposable
                 AppLog.Warn($"{needed.Name} couldn't be found on GitHub ({needed.Repo}); {id} needs it. The launcher tries again next time it starts.");
                 continue;
             }
-            status?.Report(new InstallStatus($"Installing {needed.Name} from GitHub, which {Library.Find(id)?.DisplayName ?? id} needs"));
+            status?.Report(new InstallStatus(Loc.F("Installing {0} from GitHub, which {1} needs", needed.Name, Library.Find(id)?.DisplayName ?? id)));
             InstalledMod mod = await Mods.InstallAsync(needed.Id, null, status, cancel);
             Library.Update(mod.Id, m => m.InstalledAsDependency = true);
             added.Add($"{mod.DisplayName} {mod.Version}");
@@ -446,7 +446,7 @@ public sealed class LauncherService : IDisposable
             // An enabled copy Thunderstore no longer lists is already in; don't load a second version next to it.
             if (mods.Any(m => string.Equals(m.Id, package.FullName, StringComparison.OrdinalIgnoreCase))) continue;
             if (!enabledIds.Contains(package.FullName)) AppLog.Info($"Also loading {package.FullName} {version.VersionNumber}: another enabled mod needs it.");
-            (string folder, TsVersion used) = await Mods.EnsureAsync(package, version, new SyncProgress<double>(f => Report($"Downloading {package.DisplayName} {version.VersionNumber}", f)), cancel);
+            (string folder, TsVersion used) = await Mods.EnsureAsync(package, version, new SyncProgress<double>(f => Report(Loc.F("Downloading {0} {1}", package.DisplayName, version.VersionNumber), f)), cancel);
             bool byUser = Settings.Host.ModNeeds.TryGetValue(package.FullName, out ModNeed chosen);
             ModNeed need = byUser ? chosen : ModPolicy.GuessNeed(package.FullName, package.Categories);
             mods.Add(new RuntimeMod(package.FullName, package.Name, used.VersionNumber, folder, false, need, byUser));
@@ -481,7 +481,7 @@ public sealed class LauncherService : IDisposable
         foreach ((TsPackage package, TsVersion version) in join.Downloads)
         {
             index++;
-            string label = $"Downloading {package.DisplayName} {version.VersionNumber} ({index}/{join.Downloads.Count})";
+            string label = Loc.F("Downloading {0} {1} ({2}/{3})", package.DisplayName, version.VersionNumber, index, join.Downloads.Count);
             Report(label, 0);
             await Store.EnsureAsync(version, new SyncProgress<double>(f => Report(label, f)), cancel);
         }
@@ -497,8 +497,8 @@ public sealed class LauncherService : IDisposable
 
     private async Task LaunchWithAsync(LaunchMode mode, List<RuntimeMod> mods, HostCommand? host, JoinCommand? join, CancellationToken cancel)
     {
-        string game = GameDirectory ?? throw new InvalidOperationException("Void Crew wasn't found. Choose its folder on the SETTINGS tab.");
-        if (GameProcess.IsRunning()) throw new InvalidOperationException("Void Crew is already running. Close it first.");
+        string game = GameDirectory ?? throw new InvalidOperationException(Loc.T("Void Crew wasn't found. Choose its folder on the SETTINGS tab."));
+        if (GameProcess.IsRunning()) throw new InvalidOperationException(Loc.T("Void Crew is already running. Close it first."));
         mods = mods.GroupBy(m => m.Id, StringComparer.OrdinalIgnoreCase).Select(g => g.First()).ToList();
 
         string bepInExPack = await Mods.EnsureBepInExAsync(StatusProgress(), cancel);
@@ -535,7 +535,7 @@ public sealed class LauncherService : IDisposable
             Join = join,
         };
 
-        Report("Preparing BepInEx and the mods");
+        Report(Loc.T("Preparing BepInEx and the mods"));
         await Task.Run(() => Runtime.Build(bepInExPack, mods, launch, Settings.ShowBepInExConsole), cancel);
         GameProcess.Start(game, Paths.Preloader, Settings.LaunchThroughSteam);
         UseLaunch(launch);
@@ -543,10 +543,10 @@ public sealed class LauncherService : IDisposable
         LastLaunchMode = mode;
         Report(mode switch
         {
-            LaunchMode.Join => $"Starting Void Crew to join {join?.RoomName}",
-            LaunchMode.Host => "Starting Void Crew to host your lobby",
-            LaunchMode.Browse => "Starting Void Crew for the server browser",
-            _ => "Starting Void Crew",
+            LaunchMode.Join => Loc.F("Starting Void Crew to join {0}", join?.RoomName),
+            LaunchMode.Host => Loc.T("Starting Void Crew to host your lobby"),
+            LaunchMode.Browse => Loc.T("Starting Void Crew for the server browser"),
+            _ => Loc.T("Starting Void Crew"),
         });
     }
 
@@ -554,7 +554,7 @@ public sealed class LauncherService : IDisposable
     public async Task<bool> CloseGameAsync(TimeSpan timeout, CancellationToken cancel = default)
     {
         if (!GameProcess.IsRunning()) return true;
-        Report("Closing Void Crew");
+        Report(Loc.T("Closing Void Crew"));
         if (!await Bridge.SendAsync(new Message { Type = MessageTypes.Quit })) GameProcess.RequestClose();
         return await GameProcess.WaitForExitAsync(timeout, cancel);
     }

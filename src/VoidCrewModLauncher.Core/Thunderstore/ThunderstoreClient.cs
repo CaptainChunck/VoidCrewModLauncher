@@ -129,7 +129,7 @@ public sealed class ThunderstoreClient : IDisposable
             AppLog.Warn($"Thunderstore's listing index couldn't be read ({e.Message}); reading its package list instead.");
         }
         return JsonSerializer.Deserialize<List<TsPackage>>(await GetBodyAsync(PackageListUrl, cancel), Json)
-               ?? throw new InvalidDataException("Thunderstore sent a package list the launcher couldn't read.");
+               ?? throw new InvalidDataException(Loc.T("Thunderstore sent a package list the launcher couldn't read."));
     }
 
     /// <summary>A response body, unpacked when it is gzip data (the listing index stores its files compressed).</summary>
@@ -356,7 +356,7 @@ public sealed class ThunderstoreClient : IDisposable
             }
             catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
             {
-                throw new IOException($"The download stalled: nothing arrived for {stall.TotalSeconds:0} seconds.");
+                throw new IOException(Loc.F("The download stalled: nothing arrived for {0:0} seconds.", stall.TotalSeconds));
             }
             if (read == 0) return done;
             await target.WriteAsync(buffer.AsMemory(0, read), cancel);

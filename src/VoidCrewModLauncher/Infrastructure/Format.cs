@@ -6,28 +6,28 @@ public static class Format
 {
     public static string Count(long value) => value switch
     {
-        >= 1_000_000 => $"{value / 1_000_000.0:0.#}M",
-        >= 10_000 => $"{value / 1000.0:0}K",
-        >= 1000 => $"{value / 1000.0:0.#}K",
+        >= 1_000_000 => Loc.F("{0:0.#}M", value / 1_000_000.0),
+        >= 10_000 => Loc.F("{0:0}K", value / 1000.0),
+        >= 1000 => Loc.F("{0:0.#}K", value / 1000.0),
         _ => value.ToString(),
     };
 
     public static string Bytes(long bytes) => bytes switch
     {
-        >= 1024L * 1024 * 1024 => $"{bytes / (1024.0 * 1024 * 1024):0.0} GB",
-        >= 1024L * 1024 => $"{bytes / (1024.0 * 1024):0.0} MB",
-        >= 1024 => $"{bytes / 1024.0:0} KB",
-        _ => $"{bytes} B",
+        >= 1024L * 1024 * 1024 => Loc.F("{0:0.0} GB", bytes / (1024.0 * 1024 * 1024)),
+        >= 1024L * 1024 => Loc.F("{0:0.0} MB", bytes / (1024.0 * 1024)),
+        >= 1024 => Loc.F("{0:0} KB", bytes / 1024.0),
+        _ => Loc.F("{0} B", bytes),
     };
 
     public static string Ago(DateTimeOffset time)
     {
         TimeSpan age = DateTimeOffset.Now - time;
-        if (age.TotalDays >= 365) return $"{(int)(age.TotalDays / 365)}y ago";
-        if (age.TotalDays >= 30) return $"{(int)(age.TotalDays / 30)}mo ago";
-        if (age.TotalDays >= 1) return $"{(int)age.TotalDays}d ago";
-        if (age.TotalHours >= 1) return $"{(int)age.TotalHours}h ago";
-        return "just now";
+        if (age.TotalDays >= 365) return Loc.F("{0}y ago", (int)(age.TotalDays / 365));
+        if (age.TotalDays >= 30) return Loc.F("{0}mo ago", (int)(age.TotalDays / 30));
+        if (age.TotalDays >= 1) return Loc.F("{0}d ago", (int)age.TotalDays);
+        if (age.TotalHours >= 1) return Loc.F("{0}h ago", (int)age.TotalHours);
+        return Loc.T("just now");
     }
 
     /// <summary>Opens a web page or folder with the shell. Only http(s) links and existing paths.</summary>

@@ -82,7 +82,7 @@ public sealed class JoinPlanner
         var plan = new JoinPlan { Lobby = lobby };
         if (lobby.ModsUnknown)
         {
-            plan.Warnings.Add("This lobby is modded but doesn't list its mods. If the game turns you away, the launcher looks up the mods it names.");
+            plan.Warnings.Add(Loc.T("This lobby is modded but doesn't list its mods. If the game turns you away, the launcher looks up the mods it names."));
         }
 
         foreach (LobbyMod mod in lobby.Mods)
@@ -92,7 +92,7 @@ public sealed class JoinPlanner
             string? note = null;
             if (needed && mod.Package != null && mod.PackageVersion == null && version != null)
             {
-                note = $"The host has {mod.Version}; Thunderstore doesn't have that version, so {version.VersionNumber} is used.";
+                note = Loc.F("The host has {0}; Thunderstore doesn't have that version, so {1} is used.", mod.Version, version.VersionNumber);
             }
 
             LobbyModStatus status;
@@ -112,8 +112,8 @@ public sealed class JoinPlanner
             if (needed && status == LobbyModStatus.Unavailable)
             {
                 plan.Warnings.Add(mod.Local
-                    ? $"{mod.DisplayName} is the host's own mod (not on Thunderstore). Ask the host for it, or the game may turn you away."
-                    : $"{mod.DisplayName} {mod.Version} isn't on Thunderstore. You'll need to get it yourself.");
+                    ? Loc.F("{0} is the host's own mod (not on Thunderstore). Ask the host for it, or the game may turn you away.", mod.DisplayName)
+                    : Loc.F("{0} {1} isn't on Thunderstore. You'll need to get it yourself.", mod.DisplayName, mod.Version));
             }
         }
 

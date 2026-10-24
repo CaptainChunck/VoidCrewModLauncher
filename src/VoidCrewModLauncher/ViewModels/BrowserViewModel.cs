@@ -16,7 +16,7 @@ namespace VoidCrewModLauncher.ViewModels;
 public sealed record RegionOption(string Code, string Name, int Ping)
 {
     /// <summary>Photon reports 4000 ms while it measures again; show no number then.</summary>
-    public string Label => Ping is > 0 and < 4000 ? $"{Name}  ·  {Ping} ms" : Name;
+    public string Label => Ping is > 0 and < 4000 ? Loc.F("{0}  ·  {1} ms", Name, Ping) : Name;
 
     public override string ToString() => Label;
 }
@@ -78,19 +78,19 @@ public partial class BrowserViewModel : ObservableObject
     /// <summary>The panel over the list when there's no live list: null when the list shows.</summary>
     public string? OverlayTitle => _main.GameState switch
     {
-        GameState.NotRunning => "START VOID CREW TO SEE LOBBIES",
-        GameState.Starting => "STARTING VOID CREW",
-        GameState.RunningOutside => "VOID CREW IS RUNNING WITHOUT THE LAUNCHER",
-        GameState.Booting or GameState.Loading when _rooms == null => "VOID CREW IS LOADING",
-        GameState.Menu when _main.Service.Bridge.State?.InLobby != true && _rooms == null => "CONNECTING TO VOID CREW'S SERVERS",
+        GameState.NotRunning => Loc.T("START VOID CREW TO SEE LOBBIES"),
+        GameState.Starting => Loc.T("STARTING VOID CREW"),
+        GameState.RunningOutside => Loc.T("VOID CREW IS RUNNING WITHOUT THE LAUNCHER"),
+        GameState.Booting or GameState.Loading when _rooms == null => Loc.T("VOID CREW IS LOADING"),
+        GameState.Menu when _main.Service.Bridge.State?.InLobby != true && _rooms == null => Loc.T("CONNECTING TO VOID CREW'S SERVERS"),
         _ => null,
     };
 
     public string OverlayText => _main.GameState switch
     {
-        GameState.NotRunning => "The lobby list comes from the game.",
-        GameState.Starting => "Lobbies appear when the main menu is up.",
-        GameState.RunningOutside => "Restart it from the launcher to see lobbies.",
+        GameState.NotRunning => Loc.T("The lobby list comes from the game."),
+        GameState.Starting => Loc.T("Lobbies appear when the main menu is up."),
+        GameState.RunningOutside => Loc.T("Restart it from the launcher to see lobbies."),
         _ => "",
     };
 
@@ -105,14 +105,21 @@ public partial class BrowserViewModel : ObservableObject
             StateMessage? state = _main.Service.Bridge.State;
             if (_main.GameState is GameState.Hub or GameState.Mission)
             {
-                return "You're in a game, so Void Crew isn't refreshing its lobby list. It updates again in the main menu.";
+                return Loc.T("You're in a game, so Void Crew isn't refreshing its lobby list. It updates again in the main menu.");
             }
             if (_rooms == null) return "";
             string region = MainViewModel.RegionName(_rooms.Region ?? state?.Region);
-            string online = state is { ServerPlayers: > 0 } ? $" {state.ServerPlayers} players online there." : "";
-            return LobbyCount == 0
-                ? $"No public lobbies in {region} right now.{online} Try another region, or host one."
-                : $"{LobbyCount} public lobbies in {region}" + (ShownCount != LobbyCount ? $", {ShownCount} shown." : ".") + online;
+            string? online = state is { ServerPlayers: > 0 } ? Loc.F("{0} players online there.", state.ServerPlayers) : null;
+            if (LobbyCount == 0)
+            {
+                return online != null
+                    ? Loc.F("No public lobbies in {0} right now. {1} Try another region, or host one.", region, online)
+                    : Loc.F("No public lobbies in {0} right now. Try another region, or host one.", region);
+            }
+            string lobbies = ShownCount != LobbyCount
+                ? Loc.F("{0} public lobbies in {1}, {2} shown.", LobbyCount, region, ShownCount)
+                : Loc.F("{0} public lobbies in {1}.", LobbyCount, region);
+            return online != null ? Loc.F("{0} {1}", lobbies, online) : lobbies;
         }
     }
 
@@ -277,7 +284,7 @@ public partial class BrowserViewModel : ObservableObject
     {
         if (_settingRegion || value == null) return;
         if (_main.Service.Bridge.State?.Region == value.Code) return;
-        _main.SetStatus($"Switching Void Crew to {value.Name}...");
+        _main.SetStatus(Loc.F("Switching Void Crew to {0}...", value.Name));
         _ = _main.Service.Bridge.SendAsync(new SetRegionCommand { Region = value.Code });
     }
 
@@ -291,17 +298,17 @@ public partial class BrowserViewModel : ObservableObject
     private bool CanStartGame() => !_main.IsBusy && _main.GameState == GameState.NotRunning;
 
     [RelayCommand(CanExecute = nameof(CanStartGame))]
-    private Task StartGame() => _main.RunAsync("Starting Void Crew", () => _main.Service.LaunchAsync(LaunchMode.Browse));
+    private Task StartGame() => _main.RunAsync(Loc.T("Starting Void Crew"), () => _main.Service.LaunchAsync(LaunchMode.Browse));
 
     private bool CanRestartFromLauncher() => !_main.IsBusy && _main.GameState == GameState.RunningOutside;
 
     [RelayCommand(CanExecute = nameof(CanRestartFromLauncher))]
     private async Task RestartFromLauncher()
     {
-        if (!_main.Dialogs.Confirm("Restart Void Crew", "Close the running Void Crew and start it again from the launcher, with your enabled mods?", "RESTART")) return;
-        await _main.RunAsync("Restarting Void Crew", async () =>
+        if (!_main.Dialogs.Confirm(Loc.T("Restart Void Crew"), Loc.T("Close the running Void Crew and start it again from the launcher, with your enabled mods?"), Loc.T("RESTART"))) return;
+        await _main.RunAsync(Loc.T("Restarting Void Crew"), async () =>
         {
-            if (!await _main.CloseGameOrAskAsync()) throw new InvalidOperationException("Void Crew is still running.");
+            if (!await _main.CloseGameOrAskAsync()) throw new InvalidOperationException(Loc.T("Void Crew is still running."));
             await _main.Service.LaunchAsync(LaunchMode.Browse);
         });
     }
@@ -315,16 +322,16 @@ public partial class BrowserViewModel : ObservableObject
         lobby ??= Selected;
         if (lobby == null) return;
         LauncherService service = _main.Service;
-        if (lobby.IsFull && !_main.Dialogs.Confirm("Lobby is full", $"{lobby.Name} is full ({lobby.Players}). Try anyway?", "TRY ANYWAY")) return;
+        if (lobby.IsFull && !_main.Dialogs.Confirm(Loc.T("Lobby is full"), Loc.F("{0} is full ({1}). Try anyway?", lobby.Name, lobby.Players), Loc.T("TRY ANYWAY"))) return;
 
         // The lobby's exact mod versions, looked up on Thunderstore when its list doesn't have them yet.
         Lobby current = lobby.Lobby;
         if (current.Mods.Any(m => !m.Local && m.PackageVersion == null && m.PackageId != null))
         {
-            _main.SetStatus($"Looking up {current.Name}'s mods on Thunderstore...");
+            _main.SetStatus(Loc.F("Looking up {0}'s mods on Thunderstore...", current.Name));
             await FreshenLobbyAsync(current);
             current = LobbyReader.Read(current.Room, current.Region, service.Index);
-            _main.SetStatus("Ready.");
+            _main.SetStatus(Loc.T("Ready."));
         }
 
         // Re-plan against the current library, then let the player check it.
@@ -339,17 +346,17 @@ public partial class BrowserViewModel : ObservableObject
     {
         LauncherService service = _main.Service;
         _lastJoin = (lobby, join);
-        await _main.RunAsync($"Joining {lobby.Name}", async () =>
+        await _main.RunAsync(Loc.F("Joining {0}", lobby.Name), async () =>
         {
             if (!restart && service.CanJoinWithoutRestart(join))
             {
-                _main.SetStatus($"Joining {lobby.Name}...");
+                _main.SetStatus(Loc.F("Joining {0}...", lobby.Name));
                 await service.Bridge.SendAsync(new JoinCommand { RoomId = lobby.Id, Region = lobby.Region, RoomName = lobby.Name, Modded = lobby.IsSessionModded });
                 return;
             }
-            if (GameProcess.IsRunning() && !await _main.CloseGameOrAskAsync()) throw new InvalidOperationException("Void Crew is still running, so its mods can't be changed.");
+            if (GameProcess.IsRunning() && !await _main.CloseGameOrAskAsync()) throw new InvalidOperationException(Loc.T("Void Crew is still running, so its mods can't be changed."));
             await service.JoinAsync(lobby, join);
-            _main.SetStatus($"Void Crew is starting with {lobby.Name}'s mods; it joins as soon as the main menu is ready.");
+            _main.SetStatus(Loc.F("Void Crew is starting with {0}'s mods; it joins as soon as the main menu is ready.", lobby.Name));
         });
     }
 
@@ -357,13 +364,13 @@ public partial class BrowserViewModel : ObservableObject
     {
         if (result.Ok)
         {
-            _main.SetStatus("Joined the lobby. Have fun!");
+            _main.SetStatus(Loc.T("Joined the lobby. Have fun!"));
             using var game = GameProcess.Find();
             if (game != null) GameProcess.Focus(game.Id);
             return;
         }
-        _main.SetStatus("Joining failed.");
-        _main.Dialogs.Error("Couldn't join", result.Error ?? "Void Crew couldn't join the lobby.");
+        _main.SetStatus(Loc.T("Joining failed."));
+        _main.Dialogs.Error(Loc.T("Couldn't join"), result.Error ?? Loc.T("Void Crew couldn't join the lobby."));
     }
 
     /// <summary>
@@ -394,17 +401,17 @@ public partial class BrowserViewModel : ObservableObject
             extra.AddRange(join.Mods.Where(m => PackageIndex.Simplify(m.Name) == simple || PackageIndex.Simplify(m.Id).EndsWith(simple, StringComparison.Ordinal)));
         }
 
-        var message = new System.Text.StringBuilder($"{lobby.Name} turned Void Crew away because the mods don't match.\n");
-        if (found.Count > 0) message.Append("\nIt needs (found on Thunderstore):\n").AppendJoin("\n", found.Select(f => $"  • {f.Name} → {f.Package.DisplayName} by {f.Package.Author}")).Append('\n');
-        if (notFound.Count > 0) message.Append("\nIt needs (not found on Thunderstore):\n").AppendJoin("\n", notFound.Select(n => "  • " + n)).Append('\n');
-        if (extra.Count > 0) message.Append("\nIt doesn't allow:\n").AppendJoin("\n", extra.Select(m => "  • " + m.Name.Replace('_', ' '))).Append('\n');
+        var message = new System.Text.StringBuilder(Loc.F("{0} turned Void Crew away because the mods don't match.", lobby.Name)).Append('\n');
+        if (found.Count > 0) message.Append('\n').Append(Loc.T("It needs (found on Thunderstore):")).Append('\n').AppendJoin("\n", found.Select(f => "  • " + Loc.F("{0} → {1} by {2}", f.Name, f.Package.DisplayName, f.Package.Author))).Append('\n');
+        if (notFound.Count > 0) message.Append('\n').Append(Loc.T("It needs (not found on Thunderstore):")).Append('\n').AppendJoin("\n", notFound.Select(n => "  • " + n)).Append('\n');
+        if (extra.Count > 0) message.Append('\n').Append(Loc.T("It doesn't allow:")).Append('\n').AppendJoin("\n", extra.Select(m => "  • " + m.Name.Replace('_', ' '))).Append('\n');
 
         if (found.Count == 0 && extra.Count == 0)
         {
-            _main.Dialogs.Error("Mods don't match", message.ToString());
+            _main.Dialogs.Error(Loc.T("Mods don't match"), message.ToString());
             return;
         }
-        if (!_main.Dialogs.Confirm("Mods don't match", message + "\nFix the mods and join again?", "FIX AND REJOIN", "NOT NOW")) return;
+        if (!_main.Dialogs.Confirm(Loc.T("Mods don't match"), Loc.F("{0}\nFix the mods and join again?", message), Loc.T("FIX AND REJOIN"), Loc.T("NOT NOW"))) return;
 
         var fixedJoin = new ResolvedJoin();
         fixedJoin.Mods.AddRange(join.Mods.Except(extra));

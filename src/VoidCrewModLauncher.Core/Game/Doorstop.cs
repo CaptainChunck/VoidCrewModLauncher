@@ -6,12 +6,16 @@ namespace VoidCrewModLauncher.Core.Game;
 /// <summary>What the game folder has of BepInEx's loader (Unity Doorstop: winhttp.dll and doorstop_config.ini).</summary>
 public sealed record DoorstopState(bool HasLoader, string? Version, bool? EnabledInConfig, string? ConfigTarget, bool InstalledByLauncher)
 {
-    /// <summary>Who put the loader there, for the Settings tab.</summary>
-    public string Describe()
+    /// <summary>Who put the loader there, for the Settings tab (in the launcher's language).</summary>
+    public string Describe() => Describe(true);
+
+    /// <summary>Who put the loader there; in English (<paramref name="translate"/> false) for the launcher log.</summary>
+    public string Describe(bool translate)
     {
-        if (!HasLoader) return "Not installed yet.";
-        if (InstalledByLauncher) return $"Installed by the launcher (Doorstop {Version ?? "?"}).";
-        return $"From another mod manager (Doorstop {Version ?? "?"}). Left as it is.";
+        string version = Version ?? "?";
+        if (!HasLoader) return translate ? Loc.T("Not installed yet.") : "Not installed yet.";
+        if (InstalledByLauncher) return translate ? Loc.F("Installed by the launcher (Doorstop {0}).", version) : $"Installed by the launcher (Doorstop {version}).";
+        return translate ? Loc.F("From another mod manager (Doorstop {0}). Left as it is.", version) : $"From another mod manager (Doorstop {version}). Left as it is.";
     }
 
     /// <summary>
@@ -128,14 +132,14 @@ public static class Doorstop
             if (IsOurs(configPath)) File.Delete(configPath);
             else
             {
-                throw new InvalidOperationException(
-                    $"Void Crew's folder has a doorstop_config.ini from another BepInEx install, but not its winhttp.dll. To use the launcher, " +
-                    $"delete doorstop_config.ini (and .doorstop_version, if it's there) from\n{gameDirectory}\nor put that install's winhttp.dll back.");
+                throw new InvalidOperationException(Loc.F(
+                    "Void Crew's folder has a doorstop_config.ini from another BepInEx install, but not its winhttp.dll. To use the launcher, delete doorstop_config.ini (and .doorstop_version, if it's there) from\n{0}\nor put that install's winhttp.dll back.",
+                    gameDirectory));
             }
         }
         string pack = Path.Combine(bepInExPackDirectory, "BepInExPack");
         string proxy = Path.Combine(pack, ProxyFile);
-        if (!File.Exists(proxy)) throw new FileNotFoundException("The BepInExPack in the launcher's store has no winhttp.dll.", proxy);
+        if (!File.Exists(proxy)) throw new FileNotFoundException(Loc.T("The BepInExPack in the launcher's store has no winhttp.dll."), proxy);
 
         string versionFile = Path.Combine(pack, VersionFile);
         string gameVersionFile = Path.Combine(gameDirectory, VersionFile);

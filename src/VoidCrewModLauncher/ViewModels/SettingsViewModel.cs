@@ -8,6 +8,12 @@ using VoidCrewModLauncher.Infrastructure;
 
 namespace VoidCrewModLauncher.ViewModels;
 
+/// <summary>One entry of the LANGUAGE list: a code from <see cref="Loc.Languages"/>, or null for the Windows language.</summary>
+public sealed record LanguageChoice(string? Code, string Label)
+{
+    public override string ToString() => Label;
+}
+
 /// <summary>The SETTINGS page.</summary>
 public partial class SettingsViewModel : ObservableObject
 {
@@ -36,10 +42,37 @@ public partial class SettingsViewModel : ObservableObject
     {
         GameDirectory = @"C:\Program Files (x86)\Steam\steamapps\common\Void Crew";
         _shownDataFolder = @"C:\Users\Player\AppData\Roaming\VoidCrewModLauncher";
-        StoreText = "Downloaded mods: 12.4 MB";
+        StoreText = Loc.F("Downloaded mods: {0}", Format.Bytes(13_002_342));
         OnPropertyChanged(nameof(DataFolder));
     }
     public string VersionText => $"{AppInfo.Name} {AppInfo.Version}";
+
+    /// <summary>The LANGUAGE list: the Windows language first, then every language in its own name.</summary>
+    public IReadOnlyList<LanguageChoice> Languages { get; } =
+        new[] { new LanguageChoice(null, Loc.T("Windows language")) }
+            .Concat(Loc.Languages.Select(l => new LanguageChoice(l.Code, l.NativeName)))
+            .ToList();
+
+    /// <summary>The chosen language; changing it restarts the launcher (after asking), since the text is set at start-up.</summary>
+    public LanguageChoice SelectedLanguage
+    {
+        get => Languages.FirstOrDefault(l => string.Equals(l.Code, Service.Settings.Language, StringComparison.OrdinalIgnoreCase)) ?? Languages[0];
+        set
+        {
+            if (value == null || string.Equals(value.Code, Service.Settings.Language, StringComparison.OrdinalIgnoreCase)) return;
+            if (!_main.CheckIdle(Loc.T("Changing the language"))
+                || !_main.Dialogs.Confirm(Loc.T("Restart the launcher"), Loc.T("The launcher restarts in the new language."), Loc.T("RESTART")))
+            {
+                // Put the list back once it has finished its own change.
+                System.Windows.Application.Current?.Dispatcher.BeginInvoke(() => OnPropertyChanged(nameof(SelectedLanguage)));
+                return;
+            }
+            Service.Settings.Language = value.Code;
+            Service.SaveSettings();
+            OnPropertyChanged();
+            App.Restart(_main.LauncherArguments);
+        }
+    }
     public string RepositoryUrl => AppInfo.RepositoryUrl;
 
     public bool LaunchThroughSteam
@@ -112,9 +145,9 @@ public partial class SettingsViewModel : ObservableObject
     [RelayCommand]
     private async Task CheckForUpdates()
     {
-        if (!_main.CheckIdle("Checking for updates")) return;
+        if (!_main.CheckIdle(Loc.T("Checking for updates"))) return;
         if (await _main.UpdateLauncherAsync(manual: true)) return;
-        if (await _main.UpdateModsAsync() == null) _main.SetStatus(_main.StatusText + " Your mods are up to date.");
+        if (await _main.UpdateModsAsync() == null) _main.SetStatus(Loc.F("{0} {1}", _main.StatusText, Loc.T("Your mods are up to date.")));
     }
 
     public void Refresh()
@@ -122,8 +155,8 @@ public partial class SettingsViewModel : ObservableObject
         string? game = Service.GameDirectory;
         GameDirectory = game ?? "";
         GameText = game == null
-            ? "Not found. Choose the folder with Void Crew.exe in it."
-            : Service.Settings.GameDirectory == null ? "Found through Steam." : "Chosen by you.";
+            ? Loc.T("Not found. Choose the folder with Void Crew.exe in it.")
+            : Service.Settings.GameDirectory == null ? Loc.T("Found through Steam.") : Loc.T("Chosen by you.");
         if (game != null)
         {
             DoorstopState state = Doorstop.Inspect(game);
@@ -136,7 +169,7 @@ public partial class SettingsViewModel : ObservableObject
             CanRemoveLoader = false;
         }
         long bytes = DirectorySize(Service.Paths.Store);
-        StoreText = $"Downloaded mods: {Format.Bytes(bytes)}";
+        StoreText = Loc.F("Downloaded mods: {0}", Format.Bytes(bytes));
     }
 
     private static long DirectorySize(string folder)
@@ -154,11 +187,11 @@ public partial class SettingsViewModel : ObservableObject
     [RelayCommand]
     private void BrowseGame()
     {
-        string? folder = _main.Dialogs.PickFolder("Choose the Void Crew folder (with Void Crew.exe)", Service.GameDirectory);
+        string? folder = _main.Dialogs.PickFolder(Loc.T("Choose the Void Crew folder (with Void Crew.exe)"), Service.GameDirectory);
         if (folder == null) return;
         if (!SteamLocator.IsGameDirectory(folder))
         {
-            _main.Dialogs.Error("Not the Void Crew folder", $"{folder} has no {AppInfo.GameExeName}. Choose the folder Steam installed the game in (…\\steamapps\\common\\Void Crew).");
+            _main.Dialogs.Error(Loc.T("Not the Void Crew folder"), Loc.F("{0} has no {1}. Choose the folder Steam installed the game in (…\\steamapps\\common\\Void Crew).", folder, AppInfo.GameExeName));
             return;
         }
         Service.Settings.GameDirectory = folder;
@@ -188,7 +221,7 @@ public partial class SettingsViewModel : ObservableObject
     {
         if (!File.Exists(Service.Paths.GameLog))
         {
-            _main.Dialogs.Info("No game log yet", "BepInEx writes its log (LogOutput.log) the first time Void Crew starts from the launcher.");
+            _main.Dialogs.Info(Loc.T("No game log yet"), Loc.T("BepInEx writes its log (LogOutput.log) the first time Void Crew starts from the launcher."));
             return;
         }
         Format.Reveal(Service.Paths.GameLog);
@@ -204,39 +237,39 @@ public partial class SettingsViewModel : ObservableObject
     private void RemoveLoader()
     {
         string? game = Service.GameDirectory;
-        if (game == null || !Doorstop.Inspect(game).InstalledByLauncher || !_main.CheckIdle("Removing the loader")) return;
+        if (game == null || !Doorstop.Inspect(game).InstalledByLauncher || !_main.CheckIdle(Loc.T("Removing the loader"))) return;
         if (GameProcess.IsRunning())
         {
-            _main.Dialogs.Info("Close Void Crew first", "Void Crew has the loader open while it runs.");
+            _main.Dialogs.Info(Loc.T("Close Void Crew first"), Loc.T("Void Crew has the loader open while it runs."));
             return;
         }
-        if (!_main.Dialogs.Confirm("Remove BepInEx's loader",
-                "Remove winhttp.dll and doorstop_config.ini, which the launcher added to the game folder? The launcher adds them again (after asking) the next time you start a modded game.",
-                "REMOVE")) return;
+        if (!_main.Dialogs.Confirm(Loc.T("Remove BepInEx's loader"),
+                Loc.T("Remove winhttp.dll and doorstop_config.ini, which the launcher added to the game folder? The launcher adds them again (after asking) the next time you start a modded game."),
+                Loc.T("REMOVE"))) return;
         // Something may have started while the question was open.
-        if (!_main.CheckIdle("Removing the loader") || GameProcess.IsRunning()) return;
+        if (!_main.CheckIdle(Loc.T("Removing the loader")) || GameProcess.IsRunning()) return;
         IEnumerable<string> packs = Service.Store.Versions(Core.Thunderstore.PackageIndex.BepInExPackId)
             .Select(v => Service.Store.VersionDirectory(Core.Thunderstore.PackageIndex.BepInExPackId, v)).ToList();
         if (!Doorstop.Remove(game, packs))
         {
             Refresh();
-            _main.SetStatus("Could not remove the loader from the game folder.");
+            _main.SetStatus(Loc.T("Could not remove the loader from the game folder."));
             return;
         }
         Service.Settings.DoorstopConsent = false;
         Service.SaveSettings();
         Refresh();
-        _main.SetStatus("Removed the launcher's loader from the game folder.");
+        _main.SetStatus(Loc.T("Removed the launcher's loader from the game folder."));
     }
 
     /// <summary>Deletes mod versions in the store that no installed mod uses (lobbies can download them again).</summary>
     [RelayCommand]
     private void FreeSpace()
     {
-        if (!_main.CheckIdle("Freeing space")) return;
+        if (!_main.CheckIdle(Loc.T("Freeing space"))) return;
         if (GameProcess.IsRunning())
         {
-            _main.Dialogs.Info("Close Void Crew first", "The running game may be using some of these files.");
+            _main.Dialogs.Info(Loc.T("Close Void Crew first"), Loc.T("The running game may be using some of these files."));
             return;
         }
         var keep = new HashSet<string>(Service.Library.Mods.Select(m => Path.GetFullPath(Service.Store.VersionDirectory(m.Id, m.Version))), StringComparer.OrdinalIgnoreCase);
@@ -274,6 +307,8 @@ public partial class SettingsViewModel : ObservableObject
             }
         }
         Refresh();
-        _main.SetStatus($"Removed {removed} unused mod version{(removed == 1 ? "" : "s")} ({Format.Bytes(freed)}).");
+        _main.SetStatus(removed == 1
+            ? Loc.F("Removed {0} unused mod version ({1}).", removed, Format.Bytes(freed))
+            : Loc.F("Removed {0} unused mod versions ({1}).", removed, Format.Bytes(freed)));
     }
 }

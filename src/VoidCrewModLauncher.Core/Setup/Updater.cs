@@ -92,13 +92,13 @@ public sealed class Updater : IDisposable
             if (release.Size > 0 && done != release.Size)
             {
                 File.Delete(part);
-                throw new InvalidDataException($"The download is {done:N0} bytes; GitHub says {release.Size:N0}.");
+                throw new InvalidDataException(Loc.F("The download is {0:N0} bytes; GitHub says {1:N0}.", done, release.Size));
             }
             string actual = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
             if (release.Sha256 != null && actual != release.Sha256)
             {
                 File.Delete(part);
-                throw new InvalidDataException("The download doesn't match the checksum GitHub lists for it.");
+                throw new InvalidDataException(Loc.T("The download doesn't match the checksum GitHub lists for it."));
             }
         }
         File.Move(part, target, true);
@@ -110,8 +110,8 @@ public sealed class Updater : IDisposable
     {
         FileVersionInfo info = FileVersionInfo.GetVersionInfo(exe);
         string found = $"{info.FileMajorPart}.{info.FileMinorPart}.{info.FileBuildPart}";
-        if (info.ProductName != AppInfo.Name) throw new InvalidDataException($"The download isn't the {AppInfo.Name}.");
-        if (!VersionNumber.Same(found, version)) throw new InvalidDataException($"The download is version {found}, not {version}.");
+        if (info.ProductName != AppInfo.Name) throw new InvalidDataException(Loc.F("The download isn't the {0}.", AppInfo.Name));
+        if (!VersionNumber.Same(found, version)) throw new InvalidDataException(Loc.F("The download is version {0}, not {1}.", found, version));
     }
 
     /// <summary>Deletes setups left from earlier updates (one still running is skipped and goes next time).</summary>

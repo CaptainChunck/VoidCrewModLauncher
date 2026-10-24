@@ -78,7 +78,7 @@ public sealed class Lobby
             string name = Room.Name ?? "";
             const string required = "[Mods Required]";
             if (name.StartsWith(required, StringComparison.OrdinalIgnoreCase)) name = name[required.Length..].TrimStart();
-            return name.Length == 0 ? "Unnamed lobby" : name;
+            return name.Length == 0 ? Loc.T("Unnamed lobby") : name;
         }
     }
 

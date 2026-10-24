@@ -46,7 +46,7 @@ public static class LaunchCheck
                 foreach (string line in File.ReadLines(config).Take(40).Where(l => l.Trim().Length > 0)) lines.Add($"  ini> {line.Trim()}");
             }
             DoorstopState state = Doorstop.Inspect(gameDirectory);
-            lines.Add($"  Loader: {state.Describe()} Enabled in its config: {state.EnabledInConfig?.ToString() ?? "?"}, target: {state.ConfigTarget ?? "?"}");
+            lines.Add($"  Loader: {state.Describe(false)} Enabled in its config: {state.EnabledInConfig?.ToString() ?? "?"}, target: {state.ConfigTarget ?? "?"}");
         });
         Try("Launcher files", () =>
         {
