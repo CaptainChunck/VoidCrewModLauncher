@@ -1,5 +1,30 @@
 ﻿# Changelog
 
+## 0.9.2
+
+- **Join and host errors from the game are shown in your language** (older launchers still get the English text), and hosting tells you straight away when Void Crew couldn't open the lobby, instead of after 45 seconds.
+- **The server browser keeps your place:** your selected lobby, your place in the list and the keyboard focus stay while new lobby lists come in, and an open WHO NEEDS IT list on the HOST tab stays open.
+- At the window's smallest size, lobby names show again, and long words in the lobby list, INSTALLED and MODS end in "…" instead of being cut off.
+- A mod added from your PC now loads the Thunderstore mods its manifest.json needs, when you play, host or join.
+- With both Void Manager packages turned on, only the newer one is loaded and listed in your lobby, as BepInEx would load anyway; both stay on in INSTALLED.
+- JOIN from your hub or a mission says, in orange, that Void Crew restarts and leaves the game you're in, as HOST LOBBY does.
+- FIX AND REJOIN no longer leaves out all your mods when the game names a mod without a usable name, or every mod whose name merely ends the same; a mod the join already loads is listed as loaded, not "not found on Thunderstore".
+- The server browser checks lobbies' GitHub versions with one request per mod, so it no longer uses up GitHub's hourly limit.
+- A lobby with more mods than its list has room for lists the ones everyone needs first and says it is full; joining one also loads the Void Manager "All" mods it had no room for.
+- A mod whose Void Crew listing Thunderstore rejected comes into a join only from its author's GitHub release (for authors the launcher knows), never with Thunderstore's files, and the JOIN window says where it comes from.
+- A lobby whose host you've blocked leaves the list as soon as the game knows, and host names fill in.
+- The launcher's helper now loads before your other mods, so a lobby you host reliably lists the mods whose missions or items the game requires.
+- Uninstalling asks you to close the launcher and Void Crew first, and lists anything it couldn't delete.
+- After LATER on a launcher update, the status bar still says it's out once the mod list has loaded; the start-up update check gives up after 20 seconds, and a launcher update that stops downloading fails after 30 seconds instead of waiting forever.
+- UPDATE ALL and CHECK FOR UPDATES say your mods are up to date only when they are.
+- Big downloads update the progress bar about ten times a second and no longer slow the window.
+- Typing a lobby name, dragging the crew size or searching lobbies no longer writes the settings file on every key; if another program holds that file, the status bar says so.
+- A HOST tab choice is no longer lost after a restart when the mod's id differs in capital letters, and a mod link the launcher was started with no longer asks again after a language change.
+- READMEs built to be huge show as plain text instead of freezing the window, and a mod's website link only ever opens a web page.
+- The ••• menu of a mod works with a right click too, and the launcher no longer jumps in front of the game when their connection drops and comes back while you browse.
+- An error that keeps happening shows one message, not a stack of them, and a launcher that fails while starting closes instead of staying open unseen.
+- voidcrewmod:// links only go to a launcher run by your own Windows user, and error messages you read in your language are written in English in the launcher's log.
+
 ## 0.9.1
 
 - **Fixed: after you quit Void Crew, the launcher said the game had started without its mods.** The game drops its connection to the launcher a moment before it finishes closing. The top bar now says CLOSING until it's gone, the server browser no longer offers RESTART, and the launcher log no longer gets a "never connected" report for a game that did connect.
