@@ -151,7 +151,7 @@ public partial class PackageViewModel : ObservableObject
         {
             var names = (Package.Latest?.Dependencies ?? new List<string>())
                 .Select(d => PackageReference.Parse(d) is { } r ? r.Name.Replace('_', ' ') : d)
-                .Concat(Core.GitHub.GitHubModCatalog.Default.NeededBy(Id).Select(m => m.Name + " (GitHub)"))
+                .Concat(Core.GitHub.GitHubModCatalog.Default.NeededBy(Id, Package.Latest?.VersionNumber).Select(m => m.Name + " (GitHub)"))
                 .ToList();
             return names.Count > 0 ? string.Join(", ", names) : Loc.T("None");
         }

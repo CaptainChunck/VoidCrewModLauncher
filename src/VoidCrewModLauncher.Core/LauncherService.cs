@@ -364,7 +364,7 @@ public sealed class LauncherService : IDisposable
 
     /// <summary>
     /// Installs a Thunderstore mod at its newest version (checked with Thunderstore first) and turns it on, with the
-    /// GitHub-only mods it needs (UUVR for the VR UI Fix).
+    /// GitHub-only mods it needs (UUVR for the VR UI Fix before 4.0.0).
     /// </summary>
     public async Task<InstalledMod> InstallModAsync(string id, IProgress<InstallStatus>? status, CancellationToken cancel = default)
     {
@@ -392,7 +392,7 @@ public sealed class LauncherService : IDisposable
 
     /// <summary>GitHub-only mods you have, or that one of your mods needs.</summary>
     private IEnumerable<GitHubMod> GitHubModsInUse() => GitHubMods.All.Where(m =>
-        Library.Find(m.Id) != null || Library.Mods.Any(mine => GitHubMods.NeededBy(mine.Id).Contains(m)));
+        Library.Find(m.Id) != null || Library.Mods.Any(mine => GitHubMods.NeededBy(mine.Id, mine.Version).Contains(m)));
 
     /// <summary>The newest releases of GitHub-only mods, as packages for the list.</summary>
     private async Task<List<TsPackage>> GitHubOnlyAsync(IEnumerable<GitHubMod> mods, CancellationToken cancel) =>
@@ -400,14 +400,14 @@ public sealed class LauncherService : IDisposable
             await GitHub.GetModAsync(mod, cancel) is { Latest: { } latest } package && !Mods.IsRefused(latest) ? package : null, cancel);
 
     /// <summary>
-    /// Installs the GitHub-only mods <paramref name="id"/> needs (UUVR for the VR UI Fix) at their newest release, or turns
+    /// Installs the GitHub-only mods <paramref name="id"/> needs (UUVR for the VR UI Fix before 4.0.0) at their newest release, or turns
     /// your copy on. A copy you already have, such as UUVR imported from Rai Pal, is used instead of a second one.
     /// Returns "Name version" of each mod installed.
     /// </summary>
     public async Task<List<string>> AddNeededGitHubModsAsync(string id, IProgress<InstallStatus>? status, CancellationToken cancel = default)
     {
         var added = new List<string>();
-        foreach (GitHubMod needed in GitHubMods.NeededBy(id))
+        foreach (GitHubMod needed in GitHubMods.NeededBy(id, Library.Find(id)?.Version))
         {
             if (CopyOf(needed) is { } copy)
             {
@@ -434,7 +434,7 @@ public sealed class LauncherService : IDisposable
         var added = new List<string>();
         foreach (InstalledMod mod in Library.Enabled.ToList())
         {
-            if (GitHubMods.NeededBy(mod.Id).All(needed => CopyOf(needed) != null)) continue;
+            if (GitHubMods.NeededBy(mod.Id, mod.Version).All(needed => CopyOf(needed) != null)) continue;
             added.AddRange(await AddNeededGitHubModsAsync(mod.Id, status, cancel));
         }
         return added;
@@ -447,10 +447,42 @@ public sealed class LauncherService : IDisposable
         InstalledMod? mine = Library.Find(id);
         foreach (GitHubMod provided in GitHubMods.All.Where(g => mine != null && CopyOf(g)?.Id == mine.Id))
         {
-            dependents.AddRange(Library.Enabled.Where(m => GitHubMods.NeededBy(m.Id).Contains(provided) && !dependents.Contains(m)));
+            dependents.AddRange(Library.Enabled.Where(m => GitHubMods.NeededBy(m.Id, m.Version).Contains(provided) && !dependents.Contains(m)));
         }
         return dependents;
     }
+
+    /// <summary>
+    /// <paramref name="mods"/> without the GitHub-only mods another of them includes, your own copy (imported from Rai Pal,
+    /// say) too: UUVR next to Void Crew VR 4.0.0 or newer would start VR a second time. Void Crew VR keeps it from starting,
+    /// but its patcher would still copy UUVR's files into the game's folder on every start.
+    /// </summary>
+    public List<RuntimeMod> WithoutIncludedMods(List<RuntimeMod> mods)
+    {
+        var includers = new List<(RuntimeMod Mod, GitHubMod Included)>();
+        foreach (RuntimeMod mod in mods)
+        {
+            foreach (GitHubMod included in GitHubMods.IncludedBy(mod.Id, mod.Version)) includers.Add((mod, included));
+        }
+        if (includers.Count == 0) return mods;
+
+        var kept = new List<RuntimeMod>();
+        foreach (RuntimeMod mod in mods)
+        {
+            (RuntimeMod Mod, GitHubMod Included) includer = includers.FirstOrDefault(i => IsCopy(mod, i.Included));
+            if (includer.Mod == null)
+            {
+                kept.Add(mod);
+                continue;
+            }
+            AppLog.Info($"Leaving {mod.Id} {mod.Version} out of this launch: {includer.Mod.Id} {includer.Mod.Version} includes {includer.Included.Name}.");
+        }
+        return kept;
+    }
+
+    private bool IsCopy(RuntimeMod mod, GitHubMod gitHubMod) =>
+        string.Equals(mod.Id, gitHubMod.Id, StringComparison.OrdinalIgnoreCase) ||
+        (Library.Find(mod.Id)?.PluginGuids.Any(g => g.StartsWith(gitHubMod.PluginGuidPrefix, StringComparison.OrdinalIgnoreCase)) ?? false);
 
     /// <summary>Updates one installed mod to its newest version (checked with Thunderstore first).</summary>
     public async Task UpdateModAsync(string id, IProgress<InstallStatus>? status, CancellationToken cancel = default)
@@ -541,8 +573,8 @@ public sealed class LauncherService : IDisposable
             mods.Add(new RuntimeMod(package.FullName, package.Name, used.VersionNumber, folder, false, need, byUser));
         }
 
-        // GitHub-only mods your turned-on mods need (UUVR for the VR UI Fix) load with them, like dependencies.
-        foreach (GitHubMod needed in Library.Enabled.SelectMany(m => GitHubMods.NeededBy(m.Id)).Distinct())
+        // GitHub-only mods your turned-on mods need (UUVR for the VR UI Fix before 4.0.0) load with them, like dependencies.
+        foreach (GitHubMod needed in Library.Enabled.SelectMany(m => GitHubMods.NeededBy(m.Id, m.Version)).Distinct())
         {
             if (CopyOf(needed) is not { Enabled: false } copy || mods.Any(m => string.Equals(m.Id, copy.Id, StringComparison.OrdinalIgnoreCase))) continue;
             string folder = Store.VersionDirectory(copy.Id, copy.Version);
@@ -589,6 +621,7 @@ public sealed class LauncherService : IDisposable
         string game = GameDirectory ?? throw new InvalidOperationException(Loc.T("Void Crew wasn't found. Choose its folder on the SETTINGS tab.")).InEnglish();
         if (GameProcess.IsRunning()) throw new InvalidOperationException(Loc.T("Void Crew is already running. Close it first.")).InEnglish();
         mods = mods.GroupBy(m => m.Id, StringComparer.OrdinalIgnoreCase).Select(g => g.First()).ToList();
+        mods = WithoutIncludedMods(mods);
 
         string bepInExPack = await Mods.EnsureBepInExAsync(StatusProgress(), cancel);
         DoorstopState doorstop = Doorstop.Inspect(game);

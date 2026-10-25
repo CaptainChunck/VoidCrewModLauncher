@@ -311,6 +311,37 @@ public class GitHubTests
     }
 
     [Fact]
+    public void From_the_version_that_includes_it_a_mod_neither_needs_nor_loads_the_GitHub_only_mod()
+    {
+        using var temp = new TempFolder();
+        const string fix = "Captain_Chuncks_Mods-Void_Crew_VR_UI_Fix";
+        var vr = new GitHubMod("github-Someone-VR", "VR", "Someone", new GitHubRepo("Someone", "vr"), "vr-mono-modern.zip", "someone.vr", "VR");
+        var catalog = new GitHubModCatalog(new[] { vr }, new Dictionary<string, string[]> { [fix] = new[] { vr.Id } },
+            new Dictionary<string, string> { [fix] = "4.0.0" });
+
+        Assert.Contains(vr, catalog.NeededBy(fix, "3.15.2"));
+        Assert.Contains(vr, catalog.NeededBy(fix, null));
+        Assert.Empty(catalog.NeededBy(fix, "4.0.0"));
+        Assert.Empty(catalog.NeededBy(fix, "4.1.0"));
+        Assert.Contains(vr, catalog.IncludedBy(fix, "4.0.0"));
+        Assert.Empty(catalog.IncludedBy(fix, "3.15.2"));
+        Assert.Empty(catalog.IncludedBy(fix, null));
+
+        // A copy imported from Rai Pal (found by its plugin) and the launcher's own are both left out next to 4.0.0.
+        using var service = new LauncherService(temp.AppPaths(), new FakeHttp()) { GitHubMods = catalog };
+        service.Library.AddOrReplace(new InstalledMod { Id = "local-vr", Source = ModSource.Local, Name = "VR", Version = "0.4.0", PluginGuids = new List<string> { "someone.vr-modern" } });
+        var imported = new RuntimeMod("local-vr", "VR", "0.4.0", "x", true, ModNeed.ClientOnly);
+        var own = new RuntimeMod(vr.Id, "VR", "0.4.0", "x", false, ModNeed.ClientOnly);
+        var other = new RuntimeMod("Someone-Other", "Other", "1.0.0", "x", false, ModNeed.Everyone);
+        List<RuntimeMod> launch = service.WithoutIncludedMods(new List<RuntimeMod> { new(fix, "Fix", "4.0.0", "x", false, ModNeed.ClientOnly), imported, own, other });
+        Assert.Equal(new[] { fix, "Someone-Other" }, launch.Select(m => m.Id));
+
+        // Before 4.0.0 the fix needs it, so it stays.
+        launch = service.WithoutIncludedMods(new List<RuntimeMod> { new(fix, "Fix", "3.15.2", "x", false, ModNeed.ClientOnly), imported, other });
+        Assert.Equal(3, launch.Count);
+    }
+
+    [Fact]
     public async Task Updates_that_come_out_while_playing_are_told_once()
     {
         using var temp = new TempFolder();

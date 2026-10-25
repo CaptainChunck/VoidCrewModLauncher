@@ -746,7 +746,7 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
-        string needs = string.Join(", ", Service.GitHubMods.NeededBy(package.FullName).Where(m => Service.CopyOf(m) == null).Select(m => m.Name));
+        string needs = string.Join(", ", Service.GitHubMods.NeededBy(package.FullName, version).Where(m => Service.CopyOf(m) == null).Select(m => m.Name));
         string message = (needs.Length > 0, mine != null) switch
         {
             (true, true) => Loc.F("A link asked the launcher to install {0} {1} by {2}, with {3} which it needs (you have {4}).", package.DisplayName, version, package.Author, needs, mine!.Version),
