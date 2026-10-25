@@ -1,5 +1,14 @@
 ﻿# Changelog
 
+## 0.8.2
+
+- **Local mods in multiplayer:** when the host plays with mods added from their PC (Jack's role and weapon zips, say), players who have the same mods now join with their own copies. The launcher finds them by their plugin, whatever the files are called on each PC and even when they're switched off, and turns them on for that game. Without one, JOIN says which mod (with its plugin id) and that it can't be downloaded: get it from the host or its author.
+- **Mods players are checked for are always listed as needed:** Void Manager "All" mods, Void Manager itself while one of those is on, and mods whose missions or items the game requires of every player (Warzone Mission Type) are listed for everyone in your lobby, whatever the HOST tab says, so other launchers set them up before joining. Before, a host with such a mod on Auto (or set to less) let players join from the launcher without it, and the game then said they didn't have the required mods. When the launcher overrides your choice, the row says "Players can't join without it".
+- **Auto follows what each mod tells Void Manager**, read from the mod itself (Speedometer just you, Improved Scoop host only), and remembers the mods the game required when you last hosted.
+- Your own Void Manager "All" mods stay off when you join a lobby that doesn't run them (Void Manager would turn you away).
+- When a host on an older launcher didn't list a mod the game needs, FIX AND REJOIN also loads the host's other mods.
+- Works with lobbies hosted from older launchers: their local mods are matched through Void Manager's mod list or by name.
+
 ## 0.8.1
 
 - A new launcher version is no longer installed straight away: a window says it is out, with UPDATE and LATER. LATER asks again next time the launcher starts; CHECK FOR UPDATES on the SETTINGS tab installs it any time.
