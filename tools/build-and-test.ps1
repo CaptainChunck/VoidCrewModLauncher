@@ -41,7 +41,7 @@ $checks = @(
     @("MatchMakingMenu", "OnStartPublicGame"), @("MatchMakingMenu", "OnStartPrivateGame"),
     @("MatchmakingController", "GetCachedRoomList")
 )
-$fields = @(@("MatchMakingMenu", "_roomNameField"), @("MatchMakingMenu", "_playerLimit"), @("MatchmakingController", "_cachedMatchmakingRooms"))
+$fields = @(@("MatchMakingMenu", "_roomNameField"), @("MatchMakingMenu", "_playerLimit"), @("MatchmakingController", "_cachedMatchmakingRooms"), @("PhotonService", "_currentAttempts"))
 # In ResourceAssets.dll: the game's own mod check, which the bridge reads to list the mods joining players need.
 $resourceAssets = [System.IO.Path]::Combine($VoidCrewDir, "Void Crew_Data\Managed\ResourceAssets.dll")
 $assetChecks = @(
