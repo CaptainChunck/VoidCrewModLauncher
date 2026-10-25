@@ -1,5 +1,18 @@
 ﻿# Changelog
 
+## 0.9.1
+
+- **Fixed: after you quit Void Crew, the launcher said the game had started without its mods.** The game drops its connection to the launcher a moment before it finishes closing. The top bar now says CLOSING until it's gone, the server browser no longer offers RESTART, and the launcher log no longer gets a "never connected" report for a game that did connect.
+- **Fixed: joining from a running game kept mods the JOIN dialog said were off**, and Void Manager then threw you out of unmodded lobbies without saying why. The launcher now restarts Void Crew whenever the running game has a mod the join doesn't load.
+- Fixed: hosting from a game that was already running listed each mod's "who needs it" as it was when the game started. A change on the HOST tab now restarts Void Crew before your lobby opens.
+- Lobbies you host with Void Crew Fleet can now be set to up to 48 players on the HOST tab (Fleet's own MaxPlayers setting, 24 unless you raise it, still caps the lobby). With Max_Players it goes up to 24, and its current package (NihilityShift) is recognised.
+- When a lobby turns you away because the mods don't match, only the window with FIX AND REJOIN opens, without a second "Couldn't join" message under it.
+- ADD MOD FILE, IMPORT FROM BEPINEX, removing a mod, FREE UP SPACE and the SETTINGS tab no longer freeze the window with big mods or a slow disk. The size of your downloaded mods shows once it has been counted.
+- Pressing Enter no longer picks FORCE CLOSE or DELETE THEM: it waits for the game, and keeps your mods when you uninstall.
+- Double-clicking the lobby list's scroll bar or the empty space under the lobbies no longer opens JOIN.
+- The server browser reads other players' lobby details within limits (size, number of mods, length of names) and without hidden characters that can flip or break names, so a lobby can't slow the launcher down or garble its list or log.
+- A mod file Windows won't let the launcher read no longer stops it starting.
+
 ## 0.9.0
 
 - **Releases are built by GitHub from this repository**, ready for code signing through SignPath (see the code signing policy in the README), so Windows can show who made the setup instead of warning about an unknown app.

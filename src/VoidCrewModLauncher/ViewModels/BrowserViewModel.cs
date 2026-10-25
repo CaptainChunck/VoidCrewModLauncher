@@ -372,7 +372,7 @@ public partial class BrowserViewModel : ObservableObject
         }
         _main.SetStatus(Loc.T("Joining failed."));
         // Turned away for its mods: the game's report naming them comes right after, and OnGameLeftRoom explains it on
-        // its own (with FIX AND REJOIN) instead of under a second dialog. Bridges before 0.8.3 don't give the reason.
+        // its own (with FIX AND REJOIN) instead of under a second dialog. Bridges before 0.9.1 don't give the reason.
         if (result.Reason == "mods" && IsLastJoin(result.RoomId)) return;
         _main.Dialogs.Error(Loc.T("Couldn't join"), result.Error ?? Loc.T("Void Crew couldn't join the lobby."));
     }

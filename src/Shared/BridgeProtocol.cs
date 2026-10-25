@@ -214,7 +214,7 @@ namespace VoidCrewModLauncher.Protocol
 
         /// <summary>
         /// When the game left the lobby while joining it: why, as in <see cref="DisconnectedMessage.Reason"/> (kicked, mods or
-        /// connection), and that message follows with the details. Null otherwise, and from bridges before 0.8.3.
+        /// connection), and that message follows with the details. Null otherwise, and from bridges before 0.9.1.
         /// </summary>
         public string Reason { get; set; }
     }

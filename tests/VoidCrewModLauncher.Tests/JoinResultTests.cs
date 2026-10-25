@@ -6,7 +6,7 @@ namespace VoidCrewModLauncher.Tests;
 
 /// <summary>
 /// A join the lobby turned away for mods says so in its result, so the launcher shows only the mods dialog (FIX AND
-/// REJOIN) that follows. Bridges before 0.8.3 leave the reason out, and launchers before it skip the field.
+/// REJOIN) that follows. Bridges before 0.9.1 leave the reason out, and launchers before it skip the field.
 /// </summary>
 public class JoinResultTests
 {
