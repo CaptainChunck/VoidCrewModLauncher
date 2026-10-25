@@ -21,6 +21,9 @@ public enum GameState
     /// <summary>Running, but not started by the launcher (or its bridge didn't load).</summary>
     RunningOutside,
 
+    /// <summary>Its bridge has gone and the process is ending: the game is closing.</summary>
+    Closing,
+
     Booting,
     Menu,
     Loading,
@@ -199,8 +202,8 @@ public partial class MainViewModel : ObservableObject
     /// <summary>The launch for which the launcher was put in front of the game's main menu.</summary>
     private DateTime? _frontedLaunch;
 
-    /// <summary>The launch whose game process has been seen; once it has, the process going away means the game closed.</summary>
-    private DateTime? _seenLaunch;
+    /// <summary>Starting, running without the launcher, closing or connected, from the process, the bridge and the last launch.</summary>
+    private readonly GameWatch _watch = new();
 
     /// <summary>The game's process once found: watched with HasExited instead of looking it up by name every second.</summary>
     private System.Diagnostics.Process? _gameProcess;
@@ -235,7 +238,18 @@ public partial class MainViewModel : ObservableObject
         return _gameProcess != null;
     }
 
-    private DateTime? _checkedLaunch;
+    /// <summary>The running game's process id, when the launcher could open its process.</summary>
+    private int? GameProcessId()
+    {
+        try
+        {
+            return _gameProcess?.Id;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>
     /// The game the launcher started runs but never connected: writes what the launcher can see about why to its log
@@ -243,7 +257,6 @@ public partial class MainViewModel : ObservableObject
     /// </summary>
     private void CheckLaunch(DateTime launch)
     {
-        _checkedLaunch = launch;
         SetStatus(Loc.T("Void Crew started without the launcher's mods. Details are in the launcher log (SETTINGS, LAUNCHER LOG)."));
         string? game = Service.GameDirectory;
         _ = Task.Run(() =>
@@ -263,21 +276,17 @@ public partial class MainViewModel : ObservableObject
     public void UpdateGameState()
     {
         bool running = IsGameRunning();
-        bool recentlyLaunched = Service.LastLaunchUtc is { } launched && DateTime.UtcNow - launched < TimeSpan.FromMinutes(3);
-        if (running) _seenLaunch = Service.LastLaunchUtc;
-        bool waitingForProcess = _seenLaunch != Service.LastLaunchUtc && recentlyLaunched && DateTime.UtcNow - Service.LastLaunchUtc!.Value < TimeSpan.FromSeconds(150);
+        DateTime? launch = Service.LastLaunchUtc;
+        GameRunState run = _watch.Update(DateTime.UtcNow, running, running ? GameProcessId() : null, Service.Bridge.IsConnected, launch, out bool checkLaunch);
+        if (checkLaunch && launch != null) CheckLaunch(launch.Value);
         StateMessage? state = Service.Bridge.State;
-        GameState next;
-        // Steam may need a while to start (and log in) before the game's process appears.
-        if (!running) next = waitingForProcess ? GameState.Starting : GameState.NotRunning;
-        else if (!Service.Bridge.IsConnected)
+        GameState next = run switch
         {
-            next = recentlyLaunched ? GameState.Starting : GameState.RunningOutside;
-            if (next == GameState.RunningOutside && Service.LastLaunchUtc is { } launch && _checkedLaunch != launch && _seenLaunch == launch) CheckLaunch(launch);
-        }
-        else
-        {
-            next = state?.Phase switch
+            GameRunState.NotRunning => GameState.NotRunning,
+            GameRunState.Starting => GameState.Starting,
+            GameRunState.RunningOutside => GameState.RunningOutside,
+            GameRunState.Closing => GameState.Closing,
+            _ => state?.Phase switch
             {
                 "menu" => GameState.Menu,
                 "hub" => GameState.Hub,
@@ -285,8 +294,8 @@ public partial class MainViewModel : ObservableObject
                 "boot" => GameState.Booting,
                 null => GameState.Booting,
                 _ => GameState.Loading,
-            };
-        }
+            },
+        };
         // The game takes the front again when its main menu comes up: put the launcher back on top once per launch.
         if (next == GameState.Menu && GameState != GameState.Menu && Service.LastLaunchMode == LaunchMode.Browse
             && Service.Settings.MinimizeGameWhenBrowsing && _frontedLaunch != Service.LastLaunchUtc)
@@ -300,6 +309,7 @@ public partial class MainViewModel : ObservableObject
             GameState.NotRunning => Loc.T("NOT RUNNING"),
             GameState.Starting => Loc.T("STARTING"),
             GameState.RunningOutside => Loc.T("RUNNING WITHOUT THE LAUNCHER"),
+            GameState.Closing => Loc.T("CLOSING"),
             GameState.Booting => Loc.T("LOADING"),
             GameState.Menu => state?.InLobby == true ? Loc.F("MAIN MENU · {0}", RegionName(state.Region)) : Loc.T("MAIN MENU · CONNECTING"),
             GameState.Hub => state?.IsHost == true ? Loc.F("HOSTING · {0}/{1}", state.Players, state.MaxPlayers) : Loc.F("IN A LOBBY · {0}/{1}", state?.Players, state?.MaxPlayers),
@@ -334,6 +344,8 @@ public partial class MainViewModel : ObservableObject
 
     private void OnGameConnected(HelloMessage hello)
     {
+        // Remembered so that the bridge going away while this process still runs reads as the game closing.
+        _watch.Connected(hello.ProcessId, Service.LastLaunchUtc);
         UpdateGameState();
         // Never minimise the game: Void Crew loses its graphics device (and crashes) when minimised while it loads.
         if (Service.LastLaunchMode == LaunchMode.Browse && Service.Settings.MinimizeGameWhenBrowsing) ShowWindow();
@@ -377,9 +389,10 @@ public partial class MainViewModel : ObservableObject
     public async Task<bool> CloseGameOrAskAsync()
     {
         if (await Service.CloseGameAsync(TimeSpan.FromSeconds(25))) return true;
+        // WAIT is the Enter key's: ending the game loses what it hasn't saved.
         int choice = Dialogs.Ask(Loc.T("Void Crew is still running"),
             Loc.T("Void Crew didn't close. It may be showing a question or still saving.\n\nForce it to close? Anything not saved in the game is lost."),
-            new DialogButton(Loc.T("FORCE CLOSE"), ButtonKind.Cancel), new DialogButton(Loc.T("WAIT")));
+            new DialogButton(Loc.T("FORCE CLOSE"), ButtonKind.Cancel), new DialogButton(Loc.T("WAIT"), IsDefault: true));
         if (choice != 0) return await GameProcess.WaitForExitAsync(TimeSpan.FromSeconds(30));
         GameProcess.Kill();
         return await GameProcess.WaitForExitAsync(TimeSpan.FromSeconds(10));

@@ -303,9 +303,10 @@ public partial class App : Application
         var dialogs = new Dialogs();
         if (!dialogs.Confirm(Loc.T("Uninstall"), Loc.T("Remove the Void Crew Mod Launcher from this PC?"), Loc.T("UNINSTALL"))) return;
         AppPaths paths = AppPaths.FromEnvironment(dataDir);
+        // KEEP THEM is the Enter key's, so pressing Enter through the questions never deletes the player's mods.
         bool removeData = Directory.Exists(paths.Root) && dialogs.Ask(Loc.T("Downloaded mods and settings"),
             Loc.T("Delete the launcher's downloaded mods and settings too?"),
-            new DialogButton(Loc.T("DELETE THEM"), ButtonKind.Cancel), new DialogButton(Loc.T("KEEP THEM"))) == 0;
+            new DialogButton(Loc.T("DELETE THEM"), ButtonKind.Cancel), new DialogButton(Loc.T("KEEP THEM"), IsDefault: true)) == 0;
         string? game = null;
         try
         {

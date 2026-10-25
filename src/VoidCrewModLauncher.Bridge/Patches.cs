@@ -163,7 +163,9 @@ namespace VoidCrewModLauncher.Bridge
                          (message.InvalidMods.Count > 0 ? "; mods the room doesn't allow: " + Join(message.InvalidMods) : "") + ".");
                 if (Actions.PendingJoin != null)
                 {
-                    Actions.JoinFinished(false, message.Reason == "mods" ? "The lobby's mods don't match yours." : message.Reason == "kicked" ? "The host removed you." : "The connection was lost.");
+                    // With the reason, so the launcher leaves a mod mismatch to the message below (it names the mods).
+                    Actions.JoinFinished(false, message.Reason == "mods" ? "The lobby's mods don't match yours." : message.Reason == "kicked" ? "The host removed you." : "The connection was lost.",
+                        message.Reason);
                 }
                 if (Actions.Report != null) Actions.Report(message);
             }

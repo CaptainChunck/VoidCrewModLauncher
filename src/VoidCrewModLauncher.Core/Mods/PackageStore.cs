@@ -98,21 +98,28 @@ public sealed class PackageStore
 
         string basis = VersionDirectory(reference.Id, github.Base!.VersionNumber);
         string temp = target + ".patching";
-        FileTools.DeleteDirectory(temp);
-        CopyDirectory(basis, temp);
+        // The file work runs off the caller's thread, which is the UI's when a player installs: a mod can have many files.
+        await Task.Run(() =>
+        {
+            FileTools.DeleteDirectory(temp);
+            CopyDirectory(basis, temp);
+        }, cancel);
         foreach (GitHubAsset plugin in github.Plugins)
         {
             string file = await _github.DownloadAsync(plugin, progress, cancel);
             try
             {
-                List<string> same = Directory.GetFiles(temp, "*", SearchOption.AllDirectories)
-                    .Where(f => string.Equals(Path.GetFileName(f), plugin.Name, StringComparison.OrdinalIgnoreCase)).ToList();
-                if (same.Count == 0)
+                await Task.Run(() =>
                 {
-                    FileTools.DeleteDirectory(temp);
-                    throw new InvalidDataException(Loc.F("{0} in {1}'s release isn't a file of {2}; not using that release.", plugin.Name, github.Repo, reference.Id));
-                }
-                foreach (string existing in same) FileTools.CopyFile(file, existing);
+                    List<string> same = Directory.GetFiles(temp, "*", SearchOption.AllDirectories)
+                        .Where(f => string.Equals(Path.GetFileName(f), plugin.Name, StringComparison.OrdinalIgnoreCase)).ToList();
+                    if (same.Count == 0)
+                    {
+                        FileTools.DeleteDirectory(temp);
+                        throw new InvalidDataException(Loc.F("{0} in {1}'s release isn't a file of {2}; not using that release.", plugin.Name, github.Repo, reference.Id));
+                    }
+                    foreach (string existing in same) FileTools.CopyFile(file, existing);
+                }, cancel);
             }
             finally
             {

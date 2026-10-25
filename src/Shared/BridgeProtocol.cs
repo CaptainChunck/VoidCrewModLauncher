@@ -211,6 +211,12 @@ namespace VoidCrewModLauncher.Protocol
         public string RoomId { get; set; }
         public bool Ok { get; set; }
         public string Error { get; set; }
+
+        /// <summary>
+        /// When the game left the lobby while joining it: why, as in <see cref="DisconnectedMessage.Reason"/> (kicked, mods or
+        /// connection), and that message follows with the details. Null otherwise, and from bridges before 0.8.3.
+        /// </summary>
+        public string Reason { get; set; }
     }
 
     public class HostResultMessage : Message

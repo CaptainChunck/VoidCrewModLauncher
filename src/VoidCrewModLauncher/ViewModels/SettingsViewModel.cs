@@ -42,6 +42,8 @@ public partial class SettingsViewModel : ObservableObject
     {
         GameDirectory = @"C:\Program Files (x86)\Steam\steamapps\common\Void Crew";
         _shownDataFolder = @"C:\Users\Player\AppData\Roaming\VoidCrewModLauncher";
+        // A size still being counted mustn't replace the example.
+        _sizeRequest++;
         StoreText = Loc.F("Downloaded mods: {0}", Format.Bytes(13_002_342));
         OnPropertyChanged(nameof(DataFolder));
     }
@@ -168,8 +170,32 @@ public partial class SettingsViewModel : ObservableObject
             LoaderText = "";
             CanRemoveLoader = false;
         }
-        long bytes = DirectorySize(Service.Paths.Store);
-        StoreText = Loc.F("Downloaded mods: {0}", Format.Bytes(bytes));
+        _ = ShowStoreSizeAsync();
+    }
+
+    /// <summary>The newest store size asked for; an older count that finishes later isn't shown.</summary>
+    private int _sizeRequest;
+
+    /// <summary>
+    /// Adds up every file in the store off the UI thread (big mods, a slow disk or a synced AppData folder make it slow)
+    /// and shows the size once it's known; until then the last size stays.
+    /// </summary>
+    private async Task ShowStoreSizeAsync()
+    {
+        int request = ++_sizeRequest;
+        string store = Service.Paths.Store;
+        try
+        {
+            long bytes = await Task.Run(() => DirectorySize(store));
+            _main.OnUi(() =>
+            {
+                if (request == _sizeRequest) StoreText = Loc.F("Downloaded mods: {0}", Format.Bytes(bytes));
+            });
+        }
+        catch (Exception e)
+        {
+            AppLog.Warn($"Adding up the size of {store} failed: {e.Message}");
+        }
     }
 
     private static long DirectorySize(string folder)
@@ -262,9 +288,12 @@ public partial class SettingsViewModel : ObservableObject
         _main.SetStatus(Loc.T("Removed the launcher's loader from the game folder."));
     }
 
-    /// <summary>Deletes mod versions in the store that no installed mod uses (lobbies can download them again).</summary>
+    /// <summary>
+    /// Deletes mod versions in the store that no installed mod uses (lobbies can download them again), off the UI thread
+    /// and as a long task, so nothing else starts meanwhile.
+    /// </summary>
     [RelayCommand]
-    private void FreeSpace()
+    private async Task FreeSpace()
     {
         if (!_main.CheckIdle(Loc.T("Freeing space"))) return;
         if (GameProcess.IsRunning())
@@ -272,6 +301,19 @@ public partial class SettingsViewModel : ObservableObject
             _main.Dialogs.Info(Loc.T("Close Void Crew first"), Loc.T("The running game may be using some of these files."));
             return;
         }
+        await _main.RunAsync(Loc.T("Freeing space"), async () =>
+        {
+            (int removed, long freed) = await Task.Run(() => RemoveUnusedVersions());
+            _main.SetStatus(removed == 1
+                ? Loc.F("Removed {0} unused mod version ({1}).", removed, Format.Bytes(freed))
+                : Loc.F("Removed {0} unused mod versions ({1}).", removed, Format.Bytes(freed)));
+        });
+        Refresh();
+    }
+
+    /// <summary>Deletes the store's mod versions no installed mod uses (but the newest BepInEx); returns how many and their size.</summary>
+    private (int Removed, long Freed) RemoveUnusedVersions()
+    {
         var keep = new HashSet<string>(Service.Library.Mods.Select(m => Path.GetFullPath(Service.Store.VersionDirectory(m.Id, m.Version))), StringComparer.OrdinalIgnoreCase);
         string? bepInEx = Service.Store.Versions(Core.Thunderstore.PackageIndex.BepInExPackId).OrderByDescending(v => v, Core.Thunderstore.VersionNumber.Comparer).FirstOrDefault();
         if (bepInEx != null) keep.Add(Path.GetFullPath(Service.Store.VersionDirectory(Core.Thunderstore.PackageIndex.BepInExPackId, bepInEx)));
@@ -306,9 +348,6 @@ public partial class SettingsViewModel : ObservableObject
                 }
             }
         }
-        Refresh();
-        _main.SetStatus(removed == 1
-            ? Loc.F("Removed {0} unused mod version ({1}).", removed, Format.Bytes(freed))
-            : Loc.F("Removed {0} unused mod versions ({1}).", removed, Format.Bytes(freed)));
+        return (removed, freed);
     }
 }

@@ -17,7 +17,11 @@ public enum ButtonKind
     Cancel,
 }
 
-public readonly record struct DialogButton(string Text, ButtonKind Kind = ButtonKind.Normal);
+/// <summary>
+/// A pop-up's button. Enter presses the one marked <c>IsDefault</c>, else the first: a question whose first answer can't be
+/// undone (deleting, ending the game) marks the safe answer.
+/// </summary>
+public readonly record struct DialogButton(string Text, ButtonKind Kind = ButtonKind.Normal, bool IsDefault = false);
 
 /// <summary>The launcher's pop-ups, drawn like the game's: dark grey, light-blue outline, cut corners.</summary>
 public sealed class Dialogs
@@ -76,6 +80,7 @@ public sealed class Dialogs
     {
         int result = -1;
         var window = CreateWindow(title, body, out StackPanel buttonRow);
+        int defaultButton = Math.Max(0, Array.FindIndex(buttons, b => b.IsDefault));
         for (int i = 0; i < buttons.Length; i++)
         {
             int index = i;
@@ -91,7 +96,7 @@ public sealed class Dialogs
                 }],
                 Margin = new Thickness(8, 0, 0, 0),
                 MinWidth = 120,
-                IsDefault = i == 0,
+                IsDefault = i == defaultButton,
                 IsCancel = i == buttons.Length - 1 && buttons.Length > 1,
             };
             button.Click += (_, _) =>

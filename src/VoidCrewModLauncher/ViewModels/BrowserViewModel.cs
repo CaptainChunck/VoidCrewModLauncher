@@ -81,6 +81,7 @@ public partial class BrowserViewModel : ObservableObject
         GameState.NotRunning => Loc.T("START VOID CREW TO SEE LOBBIES"),
         GameState.Starting => Loc.T("STARTING VOID CREW"),
         GameState.RunningOutside => Loc.T("VOID CREW IS RUNNING WITHOUT THE LAUNCHER"),
+        GameState.Closing => Loc.T("VOID CREW IS CLOSING"),
         GameState.Booting or GameState.Loading when _rooms == null => Loc.T("VOID CREW IS LOADING"),
         GameState.Menu when _main.Service.Bridge.State?.InLobby != true && _rooms == null => Loc.T("CONNECTING TO VOID CREW'S SERVERS"),
         _ => null,
@@ -127,7 +128,7 @@ public partial class BrowserViewModel : ObservableObject
 
     public void OnGameStateChanged()
     {
-        if (_main.GameState is GameState.NotRunning or GameState.RunningOutside)
+        if (_main.GameState is GameState.NotRunning or GameState.RunningOutside or GameState.Closing)
         {
             _rooms = null;
             _lobbies.Clear();
@@ -370,8 +371,14 @@ public partial class BrowserViewModel : ObservableObject
             return;
         }
         _main.SetStatus(Loc.T("Joining failed."));
+        // Turned away for its mods: the game's report naming them comes right after, and OnGameLeftRoom explains it on
+        // its own (with FIX AND REJOIN) instead of under a second dialog. Bridges before 0.8.3 don't give the reason.
+        if (result.Reason == "mods" && IsLastJoin(result.RoomId)) return;
         _main.Dialogs.Error(Loc.T("Couldn't join"), result.Error ?? Loc.T("Void Crew couldn't join the lobby."));
     }
+
+    /// <summary>The lobby the launcher last joined, which FIX AND REJOIN can try again.</summary>
+    private bool IsLastJoin(string? roomId) => _lastJoin is { } last && string.Equals(roomId, last.Lobby.Id, StringComparison.Ordinal);
 
     /// <summary>
     /// The game left a room on its own. When it was the lobby the launcher last joined and the game names mods the
@@ -379,9 +386,8 @@ public partial class BrowserViewModel : ObservableObject
     /// </summary>
     public void OnGameLeftRoom(DisconnectedMessage left)
     {
-        if (left.Reason != "mods" || _lastJoin == null) return;
-        (Lobby lobby, ResolvedJoin join) = _lastJoin.Value;
-        if (!string.Equals(left.RoomId, lobby.Id, StringComparison.Ordinal)) return;
+        if (left.Reason != "mods" || !IsLastJoin(left.RoomId) || _lastJoin is not { } last) return;
+        (Lobby lobby, ResolvedJoin join) = last;
         _lastJoin = null;
         PackageIndex index = _main.Service.Index;
 

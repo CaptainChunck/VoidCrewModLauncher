@@ -173,7 +173,8 @@ namespace VoidCrewModLauncher.Bridge
             if (PendingHost) HostFinished(false, "Void Crew didn't open the lobby within " + (int)Timeout + " seconds.");
         }
 
-        public static void JoinFinished(bool ok, string error)
+        /// <param name="reason">Why the game left the lobby while joining it (kicked, mods or connection), when it did.</param>
+        public static void JoinFinished(bool ok, string error, string reason = null)
         {
             if (PendingJoin == null) return;
             string room = PendingJoin;
@@ -181,7 +182,7 @@ namespace VoidCrewModLauncher.Bridge
             _joinAfterRegion = null;
             if (ok) Log.Info("Joined " + room + ".");
             else Log.Warn("Joining " + room + " failed: " + error);
-            if (Report != null) Report(new JoinResultMessage { RoomId = room, Ok = ok, Error = error });
+            if (Report != null) Report(new JoinResultMessage { RoomId = room, Ok = ok, Error = error, Reason = reason });
         }
 
         public static void HostFinished(bool ok, string error)

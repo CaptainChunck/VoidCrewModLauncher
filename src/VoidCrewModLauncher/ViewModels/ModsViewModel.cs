@@ -176,7 +176,7 @@ public partial class ModsViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void Uninstall(InstalledModViewModel row)
+    private async Task Uninstall(InstalledModViewModel row)
     {
         if (!_main.CheckIdle(Loc.F("Removing {0}", row.Name))) return;
         List<InstalledMod> dependents = _main.Service.EnabledDependents(row.Id);
@@ -185,10 +185,15 @@ public partial class ModsViewModel : ObservableObject
                 row.Name, row.Version, string.Join(", ", dependents.Select(d => d.DisplayName)))
             : Loc.F("Remove {0} {1} from the launcher?\n\nIts settings file (BepInEx\\config) is kept.", row.Name, row.Version);
         if (!_main.Dialogs.Confirm(Loc.T("Remove mod"), question, Loc.T("REMOVE"))) return;
-        // Something may have started while the question was up.
-        if (!_main.CheckIdle(Loc.F("Removing {0}", row.Name))) return;
-        _main.Service.Mods.Uninstall(row.Id);
-        _main.SetStatus(Loc.F("Removed {0}.", row.Name));
+        // RunAsync checks again (something may have started while the question was up). Every version of the mod is
+        // deleted off the UI thread.
+        string id = row.Id;
+        string name = row.Name;
+        await _main.RunAsync(Loc.F("Removing {0}", name), async () =>
+        {
+            await Task.Run(() => _main.Service.Mods.Uninstall(id));
+            _main.SetStatus(Loc.F("Removed {0}.", name));
+        });
     }
 
     [RelayCommand]
@@ -210,20 +215,17 @@ public partial class ModsViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void AddLocal()
+    private async Task AddLocal()
     {
         if (!_main.CheckIdle(Loc.T("Adding a mod"))) return;
         string? file = _main.Dialogs.PickFile(Loc.T("Add a mod from your PC"), Loc.T("Mods (*.dll;*.zip)|*.dll;*.zip|All files|*.*"));
         if (file == null) return;
-        try
+        // Unpacking (a zip can hold 2 GB), reading the DLLs and copying into the store run off the UI thread.
+        await _main.RunAsync(Loc.T("Adding a mod"), async () =>
         {
-            InstalledMod mod = LocalMods.Add(_main.Service.Mods, file);
+            InstalledMod mod = await Task.Run(() => LocalMods.Add(_main.Service.Mods, file));
             _main.SetStatus(Loc.F("Added {0} {1}. It's on.", mod.DisplayName, mod.Version));
-        }
-        catch (Exception e)
-        {
-            _main.Dialogs.Error(Loc.T("Couldn't add the mod"), e.Message);
-        }
+        });
     }
 
     [RelayCommand]
@@ -231,7 +233,15 @@ public partial class ModsViewModel : ObservableObject
     {
         string? folder = _main.Dialogs.PickFolder(Loc.T("Choose a BepInEx folder to import from"), GuessImportFolder());
         if (folder == null) return;
-        List<ImportCandidate> candidates = LocalMods.Scan(folder, _main.Service.Index);
+        // Reading every DLL of the other folder, then copying the picked mods, run off the UI thread.
+        PackageIndex index = _main.Service.Index;
+        List<ImportCandidate> candidates = new();
+        bool scanned = await _main.RunAsync(Loc.T("Importing mods"), async () =>
+        {
+            candidates = await Task.Run(() => LocalMods.Scan(folder, index));
+            _main.SetStatus(Loc.T("Ready."));
+        });
+        if (!scanned) return;
         if (candidates.Count == 0)
         {
             _main.Dialogs.Info(Loc.T("Nothing to import"), Loc.F("No mods in {0}. Choose the BepInEx folder (the one with plugins in it).", folder));
@@ -244,9 +254,9 @@ public partial class ModsViewModel : ObservableObject
             foreach ((ImportCandidate candidate, bool fromThunderstore) in picked)
             {
                 if (fromThunderstore && candidate.Match != null) await _main.Service.InstallModAsync(candidate.Match.FullName, Progress());
-                else LocalMods.Import(_main.Service.Mods, candidate);
+                else await Task.Run(() => LocalMods.Import(_main.Service.Mods, candidate));
             }
-            int configs = LocalMods.CopyMissingConfigs(folder, _main.Service.Paths.RuntimeBepInEx);
+            int configs = await Task.Run(() => LocalMods.CopyMissingConfigs(folder, _main.Service.Paths.RuntimeBepInEx));
             _main.SetStatus((picked.Count == 1, configs > 0) switch
             {
                 (true, true) => Loc.F("Imported {0} mod and {1} settings files.", picked.Count, configs),

@@ -73,9 +73,6 @@ public partial class HostModViewModel : ObservableObject
 /// <summary>The HOST LOBBY page: the lobby's settings and its mods; HOST LOBBY starts the game straight into the hub.</summary>
 public partial class HostViewModel : ObservableObject
 {
-    /// <summary>Mods that let rooms hold more than the game's 6 players.</summary>
-    private static readonly string[] BiggerRooms = { "Captain_Chuncks_Mods-Void_Crew_Fleet", "VoidCrewModdingTeam-Max_Players" };
-
     private readonly MainViewModel _main;
 
     public HostViewModel(MainViewModel main)
@@ -118,7 +115,8 @@ public partial class HostViewModel : ObservableObject
         {
             Mods.Add(new HostModViewModel(this, mod, needs));
         }
-        int limit = Mods.Any(m => BiggerRooms.Contains(m.Mod.Id, StringComparer.OrdinalIgnoreCase)) ? 16 : 6;
+        // The game's 6, or more with a mod that raises it: the bridge puts the size on the game's host panel.
+        int limit = ModPolicy.RoomLimit(Mods.Select(m => m.Mod.Id));
         _limiting = true;
         try
         {

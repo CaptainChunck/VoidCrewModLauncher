@@ -126,6 +126,9 @@
                                         <DataTrigger Binding="{Binding GameState}" Value="Loading">
                                             <Setter Property="Fill" Value="{StaticResource Orange}" />
                                         </DataTrigger>
+                                        <DataTrigger Binding="{Binding GameState}" Value="Closing">
+                                            <Setter Property="Fill" Value="{StaticResource Orange}" />
+                                        </DataTrigger>
                                         <DataTrigger Binding="{Binding GameState}" Value="RunningOutside">
                                             <Setter Property="Fill" Value="{StaticResource Red}" />
                                         </DataTrigger>

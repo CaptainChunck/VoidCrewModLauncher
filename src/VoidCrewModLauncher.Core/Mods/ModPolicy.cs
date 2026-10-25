@@ -35,6 +35,26 @@ public static class ModPolicy
 
     public static bool IsVoidManager(string? id) => VoidManagerIds.Contains(id ?? "", StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>The most players the game itself lets a lobby have.</summary>
+    public const int GameRoomLimit = 6;
+
+    /// <summary>
+    /// Mods that let lobbies hold more players than the game's 6, with the most each lets the game's host panel go to. The
+    /// bridge sets a lobby's size on that panel, so a bigger number is cut down to the mod's own setting there.
+    /// </summary>
+    private static readonly Dictionary<string, int> BiggerRooms = new(StringComparer.OrdinalIgnoreCase)
+    {
+        // Six ships of eight in a 3v3 Fleet Battle; its own MaxPlayers setting (24 unless raised) is the panel's limit.
+        ["Captain_Chuncks_Mods-Void_Crew_Fleet"] = 48,
+        // Its host-panel slider goes to its SliderLimit setting, 24 unless raised (the old package as well).
+        ["NihilityShift-Max_Players"] = 24,
+        ["VoidCrewModdingTeam-Max_Players"] = 24,
+    };
+
+    /// <summary>The largest crew size the HOST tab offers with these mods on.</summary>
+    public static int RoomLimit(IEnumerable<string> modIds) =>
+        modIds.Select(id => BiggerRooms.TryGetValue(id, out int limit) ? limit : GameRoomLimit).DefaultIfEmpty(GameRoomLimit).Max();
+
     /// <param name="voidManagerType">The VoidManager type the mod's DLLs declare (see <see cref="PluginScanner"/>), when known.</param>
     public static ModNeed GuessNeed(string id, IReadOnlyCollection<string>? categories, bool local = false, int? voidManagerType = null)
     {
