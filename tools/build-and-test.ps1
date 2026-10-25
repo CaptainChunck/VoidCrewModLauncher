@@ -1,22 +1,18 @@
-# Builds everything and runs the offline tests (no game launch): the bridge against your installed game, the core,
-# the launcher, the unit tests, and a check that every game method the bridge hooks still exists.
-# Usage: powershell -ExecutionPolicy Bypass -File tools\build-and-test.ps1 [-VoidCrewDir "<game folder>"] [-BepInExDir "<BepInEx folder>"]
+# Builds everything and runs the offline tests (no game launch): the bridge, the core, the launcher, the unit tests,
+# and, when Void Crew is installed, a check that every game method the bridge hooks still exists in that version.
+# Usage: powershell -ExecutionPolicy Bypass -File tools\build-and-test.ps1 [-VoidCrewDir "<game folder>"]
 param(
-    [string]$VoidCrewDir = "",
-    [string]$BepInExDir = ""
+    [string]$VoidCrewDir = ""
 )
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
-$properties = @()
-if ($VoidCrewDir) { $properties += "-p:VoidCrewDir=$VoidCrewDir" }
-if ($BepInExDir) { $properties += "-p:BepInExDir=$BepInExDir" }
 
 # The bridge first: the solution build reaches it twice (directly and through the core, which carries it), and two
 # compiles of it at once fight over its output file.
-dotnet build (Join-Path $root "src\VoidCrewModLauncher.Bridge\VoidCrewModLauncher.Bridge.csproj") -c Release @properties -nologo -v:minimal
+dotnet build (Join-Path $root "src\VoidCrewModLauncher.Bridge\VoidCrewModLauncher.Bridge.csproj") -c Release -nologo -v:minimal
 if ($LASTEXITCODE -ne 0) { throw "The bridge plugin didn't build." }
-dotnet build (Join-Path $root "VoidCrewModLauncher.slnx") -c Release @properties -nologo -v:minimal
+dotnet build (Join-Path $root "VoidCrewModLauncher.slnx") -c Release -nologo -v:minimal
 if ($LASTEXITCODE -ne 0) { throw "The build failed." }
 
 dotnet test (Join-Path $root "tests\VoidCrewModLauncher.Tests\VoidCrewModLauncher.Tests.csproj") -c Release --no-build -nologo -v:minimal
@@ -25,6 +21,13 @@ if ($LASTEXITCODE -ne 0) { throw "Tests failed." }
 # The bridge only hooks a handful of the game's methods; make sure they're all still there in this game version.
 if (-not $VoidCrewDir) { $VoidCrewDir = "G:\SteamLibrary\steamapps\common\Void Crew" }
 $assembly = Join-Path $VoidCrewDir "Void Crew_Data\Managed\Assembly-CSharp.dll"
+if (-not (Test-Path $assembly)) {
+    # GitHub's release build has no game: the bridge builds against reference packages, and the hooks are checked on
+    # a PC with Void Crew before each release.
+    Write-Output "Void Crew isn't installed at $VoidCrewDir; skipped the game hook checks."
+    Write-Output "All builds and tests passed."
+    return
+}
 $checks = @(
     @("PhotonService", "OnCreatedRoom"), @("PhotonService", "OnCreateRoomFailed"), @("PhotonService", "OnJoinedRoom"),
     @("PhotonService", "OnJoinRoomFailed"), @("PhotonService", "OnMasterClientSwitched"), @("PhotonService", "ConnectToRegion"),

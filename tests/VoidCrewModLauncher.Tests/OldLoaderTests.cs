@@ -24,6 +24,13 @@ public class OldLoaderTests
         Assert.Equal("new proxy", File.ReadAllText(Path.Combine(game, Doorstop.ProxyFile)));
         Assert.Equal("old proxy", File.ReadAllText(Path.Combine(game, Doorstop.ProxyFile + Doorstop.OldLoaderSuffix)));
         Assert.True(File.Exists(Path.Combine(game, Doorstop.ConfigFile + Doorstop.OldLoaderSuffix)));
+
+        // Removing the launcher's loader puts the old one back, so the manual install works again.
+        Assert.True(Doorstop.Remove(game, new[] { Path.Combine(temp.Path, "pack") }));
+        Assert.Equal("old proxy", File.ReadAllText(Path.Combine(game, Doorstop.ProxyFile)));
+        Assert.Equal("3.4.0", File.ReadAllText(Path.Combine(game, Doorstop.VersionFile)));
+        Assert.Contains("[UnityDoorstop]", File.ReadAllText(Path.Combine(game, Doorstop.ConfigFile)));
+        Assert.Empty(Directory.GetFiles(game, "*" + Doorstop.OldLoaderSuffix));
     }
 
     [Fact]

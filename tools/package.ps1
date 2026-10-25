@@ -1,12 +1,8 @@
 # Builds a release in dist\:
 #   VoidCrewModLauncher-Setup.exe            the one-click install: one self-contained exe (no .NET needed) that installs
 #                                            itself when double-clicked, with the bridge plugin inside it
-# Usage: powershell -ExecutionPolicy Bypass -File tools\package.ps1 [-VoidCrewDir "<game folder>"] [-BepInExDir "<BepInEx folder>"]
-# The bridge plugin builds against your installed game and BepInEx (see src\VoidCrewModLauncher.Bridge\*.csproj).
-param(
-    [string]$VoidCrewDir = "",
-    [string]$BepInExDir = ""
-)
+# Usage: powershell -ExecutionPolicy Bypass -File tools\package.ps1
+# Releases are built by GitHub Actions (.github\workflows\release.yml) from a version tag and signed through SignPath.
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
@@ -18,8 +14,6 @@ if ($plugin.Matches[0].Groups[1].Value -ne $version) {
 }
 
 $properties = @("-p:Configuration=Release")
-if ($VoidCrewDir) { $properties += "-p:VoidCrewDir=$VoidCrewDir" }
-if ($BepInExDir) { $properties += "-p:BepInExDir=$BepInExDir" }
 
 # The bridge first (the launcher carries it inside), then the launcher as one self-contained file.
 dotnet build (Join-Path $root "src\VoidCrewModLauncher.Bridge\VoidCrewModLauncher.Bridge.csproj") @properties -nologo -v:minimal

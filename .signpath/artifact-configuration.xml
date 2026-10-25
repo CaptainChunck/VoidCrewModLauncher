@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration for the release workflow (.github/workflows/release.yml). Paste it into the SignPath
+  project's artifact configuration. GitHub's upload-artifact step zips the setup, so the root is a zip-file; the one
+  file in it is Authenticode-signed. SignPath also checks the product name and version recorded in the exe.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="VoidCrewModLauncher-Setup.exe" product-name="Void Crew Mod Launcher" max-matches="1">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

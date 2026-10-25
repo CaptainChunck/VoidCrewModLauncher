@@ -422,6 +422,21 @@ public partial class MainViewModel : ObservableObject
                 Service.SaveSettings();
                 await work();
             }
+            catch (DoorstopOutdatedException outdated)
+            {
+                if (!Dialogs.Confirm(Loc.T("Replace the old BepInEx loader"),
+                        Loc.F("Void Crew's folder has an old BepInEx loader (Doorstop {0}) from another install, which can't load the launcher's mods:\n{1}\n\nThe launcher puts its own loader in its place. The old files stay next to it, with {2} on the end of their names.",
+                            outdated.Version, outdated.GameDirectory, Doorstop.OldLoaderSuffix),
+                        Loc.T("REPLACE AND CONTINUE")))
+                {
+                    SetStatus(Loc.T("Cancelled: the game folder was left as it is."));
+                    return false;
+                }
+                Service.Settings.DoorstopConsent = true;
+                Service.Settings.ReplaceOutdatedDoorstop = true;
+                Service.SaveSettings();
+                await work();
+            }
             if (StatusText == working) SetStatus(Loc.T("Done."));
             return true;
         }

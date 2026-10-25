@@ -9,6 +9,9 @@ and joins the lobby for you. No more guessing which mods a lobby needs.
 It is also a full mod manager (your installed mods with on/off switches, and all of Thunderstore's Void Crew mods), and
 it hosts lobbies with your mods in one click.
 
+**[Download the latest release](https://github.com/CaptainChunck/VoidCrewModLauncher/releases/latest)** ·
+[Code signing policy](#code-signing-policy)
+
 ![Server browser: public lobbies with the mods each one runs](docs/screenshots/server-browser.png)
 <sub>Screenshots show sample lobbies and mods (`tools/screenshots.ps1` draws them again).</sub>
 
@@ -91,7 +94,9 @@ Before the game is running, the server browser offers to start it (the lobby lis
   The launcher rebuilds its BepInEx folder for each launch and starts the game through Steam with BepInEx's loader
   (Doorstop) pointed at it, the way r2modman does. The game folder only needs Doorstop's two small files: if they
   aren't there yet, the launcher asks before adding them, switched off, so starting Void Crew from Steam stays
-  unmodded. If another loader is already there (Rai Pal, r2modman, a manual BepInEx), it is left exactly as it is.
+  unmodded. If another loader is already there (Rai Pal, r2modman, a manual BepInEx), it is left exactly as it is,
+  unless it is an old Doorstop 3, which can't load the launcher's BepInEx: then the launcher asks to put its own in its
+  place, keeps the old files next to it (`.old-doorstop`), and puts them back when its loader is removed.
 - **Mod settings carry over.** `BepInEx\config` is kept between launches, whichever lobby you join.
 - **The bridge never changes the game.** It reads the room list, joins and hosts through the game's own join and host
   code (so the game's checks still apply), and adds the mod list to lobbies you host. It doesn't mark rooms as modded:
@@ -102,15 +107,18 @@ Before the game is running, the server browser offers to start it (the lobby lis
 
 1. Download **`VoidCrewModLauncher-Setup.exe`** from the latest
    [release](https://github.com/CaptainChunck/VoidCrewModLauncher/releases/latest).
-2. Double-click it. It installs itself (Start menu and desktop shortcuts, no admin rights needed) and opens. It finds
-   Void Crew through Steam (or choose its folder on the SETTINGS tab).
+2. Double-click it. It says where it installs and what it adds, then installs itself (Start menu and desktop
+   shortcuts, no admin rights needed) and opens. It finds Void Crew through Steam (or choose its folder on the SETTINGS
+   tab).
 
-Windows 10 or 11 (64-bit); no .NET install needed. Windows may warn about an unrecognised app the first time: choose
-**More info**, then **Run anyway**. The first launch downloads BepInEx (BepInExPack) from Thunderstore.
+Windows 10 or 11 (64-bit); no .NET install needed. The first launch downloads BepInEx (BepInExPack) from Thunderstore.
+Releases are being set up for code signing (see [Code signing policy](#code-signing-policy)). Until then, and for a
+while after as signed releases build up reputation, Windows may warn about the setup the first time: choose
+**More info**, then **Run anyway**.
 
-- **Update:** the launcher updates itself: at start it checks GitHub, downloads a new version (checked against the
-  checksum GitHub lists), installs it and opens again. SETTINGS > UPDATES turns this and the mod updates off or checks
-  right away. (Version 0.1.0 can't update itself: install 0.2.0 once by hand.)
+- **Update:** at start the launcher checks GitHub for a new version and asks: UPDATE downloads it (checked against the
+  checksum GitHub lists), installs it and opens again; LATER asks next time. SETTINGS > UPDATES turns the check and the
+  mod updates off or checks right away. (Version 0.1.0 can't update itself: install 0.2.0 once by hand.)
 - **Uninstall:** Windows **Settings > Apps > Installed apps > Void Crew Mod Launcher > Uninstall**. It asks whether to
   delete your downloaded mods and settings too, and removes BepInEx's loader from the game folder if the launcher added it.
 - **Portable:** put an empty `portable.txt` next to the exe (or start it with `--portable`) and it runs where it is.
@@ -170,11 +178,15 @@ the setup first: `https://github.com/CaptainChunck/VoidCrewModLauncher/releases/
 
 ## Building from source
 
-- **Requirements:** the .NET 10 SDK, and Void Crew with BepInEx 5 installed (the bridge plugin builds against the game).
-- **Build and test:** `powershell -ExecutionPolicy Bypass -File tools\build-and-test.ps1 -VoidCrewDir "<game folder>" -BepInExDir "<BepInEx folder>"`
-  builds everything, runs the offline tests and checks that every game method the bridge uses is still in the game.
-- **Release:** `powershell -ExecutionPolicy Bypass -File tools\package.ps1` makes `dist\VoidCrewModLauncher-Setup.exe` (the
-  one-click install).
+- **Requirements:** the .NET 10 SDK. The bridge plugin builds against reference packages (VoidCrew.GameLibs, BepInEx's
+  base library and HarmonyX from NuGet), so the game isn't needed to build.
+- **Build and test:** `powershell -ExecutionPolicy Bypass -File tools\build-and-test.ps1 [-VoidCrewDir "<game folder>"]`
+  builds everything, runs the offline tests and, when Void Crew is installed, checks that every game method the bridge
+  uses is still in the game.
+- **Release:** set the version in `Directory.Build.props` and the bridge's `Plugin.cs`, add it to `CHANGELOG.md`, then
+  push a tag `v<version>`. GitHub Actions (`.github/workflows/release.yml`) builds and tests it, packs
+  `VoidCrewModLauncher-Setup.exe`, has it signed through SignPath (after an approver approves the request) and drafts
+  the release; publish the draft once checked. `tools\package.ps1` makes the same setup locally (unsigned) in `dist\`.
 - **Screenshots:** `powershell -ExecutionPolicy Bypass -File tools\screenshots.ps1` redraws `docs\screenshots`.
 - **Look at the pages without the game:** `VoidCrewModLauncher.exe --render-previews <folder>` draws every page with
   sample lobbies into PNGs.
@@ -182,6 +194,25 @@ the setup first: `https://github.com/CaptainChunck/VoidCrewModLauncher/releases/
 - To try the install or the self-update without touching your real install: `VCML_INSTALL_ROOT=<folder>` installs into
   that folder (and a test registry key), and `VCML_UPDATE_FEED=<url>` reads the release from that URL (GitHub's release
   JSON) instead of GitHub.
+
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by
+[SignPath Foundation](https://signpath.org/).
+
+- Only `VoidCrewModLauncher-Setup.exe` from this repository's releases is signed, and only when GitHub Actions built it
+  from this repository's source (`.github/workflows/release.yml`). The setup contains the launcher and its bridge
+  plugin, both built from this source.
+- Every release is approved before it is signed.
+- **Team:** committers and reviewers: [CaptainChunck](https://github.com/CaptainChunck); approvers:
+  [CaptainChunck](https://github.com/CaptainChunck).
+
+### Privacy
+
+The launcher collects no personal data and sends nothing about you to the developer or anyone else. It downloads
+mod lists, mods and its own updates from Thunderstore, GitHub and voidcrewmod.com (those sites see a normal web request,
+as with any download). It talks to Void Crew only on your PC (a loopback connection). When you host a lobby, the
+lobby's mod list is added to it through Void Crew's own lobby system, so players browsing can see what to install.
 
 ## License
 

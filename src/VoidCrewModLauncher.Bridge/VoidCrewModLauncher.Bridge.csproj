@@ -3,8 +3,10 @@
     The launcher's helper mod inside Void Crew (a BepInEx 5 plugin). The launcher embeds the built DLL and installs it
     into its own BepInEx folder before every launch; players never install it by hand.
 
-    It builds against the installed game and BepInEx. Change these two paths to match your PC, or pass them on the
-    command line: dotnet build -p:VoidCrewDir="D:\Games\Void Crew" -p:BepInExDir="...\BepInEx"
+    It builds against reference packages, so no game is needed to build it (GitHub's release build has none):
+    VoidCrew.GameLibs (the game's assemblies as references, from the Void Crew modding community), BepInEx 5's base
+    library and HarmonyX at the versions BepInExPack 5.4.23 ships. tools\build-and-test.ps1 checks the hooks against
+    the installed game when there is one.
   -->
   <PropertyGroup>
     <TargetFramework>net48</TargetFramework>
@@ -19,40 +21,15 @@
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
   </PropertyGroup>
 
-  <PropertyGroup>
-    <VoidCrewDir Condition=" '$(VoidCrewDir)' == '' ">G:\SteamLibrary\steamapps\common\Void Crew</VoidCrewDir>
-    <BepInExDir Condition=" '$(BepInExDir)' == '' ">$(APPDATA)\raicuparta\rai-pal\data\installed-mods\3743495372862092943\bepinex\BepInEx</BepInExDir>
-    <GameManaged>$(VoidCrewDir)\Void Crew_Data\Managed</GameManaged>
-  </PropertyGroup>
-
   <ItemGroup>
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+    <!-- Supplied by the game and BepInEx at runtime: references only, nothing is copied to the output. -->
+    <PackageReference Include="VoidCrew.GameLibs" Version="1.3.0" PrivateAssets="all" ExcludeAssets="runtime" />
+    <PackageReference Include="BepInEx.BaseLib" Version="5.4.21" PrivateAssets="all" ExcludeAssets="runtime" />
+    <PackageReference Include="HarmonyX" Version="2.9.0" PrivateAssets="all" ExcludeAssets="runtime" />
   </ItemGroup>
 
   <ItemGroup>
     <Compile Include="..\Shared\*.cs" Link="Shared\%(Filename)%(Extension)" />
   </ItemGroup>
-
-  <!-- Every reference is supplied by the game or BepInEx at runtime, so none are copied to the output. -->
-  <ItemGroup>
-    <Reference Include="0Harmony" HintPath="$(BepInExDir)\core\0Harmony.dll" Private="false" />
-    <Reference Include="BepInEx" HintPath="$(BepInExDir)\core\BepInEx.dll" Private="false" />
-    <Reference Include="Assembly-CSharp" HintPath="$(GameManaged)\Assembly-CSharp.dll" Private="false" />
-    <Reference Include="ResourceAssets" HintPath="$(GameManaged)\ResourceAssets.dll" Private="false" />
-    <Reference Include="VoidCrewCommon" HintPath="$(GameManaged)\VoidCrewCommon.dll" Private="false" />
-    <Reference Include="PALCore" HintPath="$(GameManaged)\PALCore.dll" Private="false" />
-    <Reference Include="Newtonsoft.Json" HintPath="$(GameManaged)\Newtonsoft.Json.dll" Private="false" />
-    <Reference Include="Photon3Unity3D" HintPath="$(GameManaged)\Photon3Unity3D.dll" Private="false" />
-    <Reference Include="PhotonRealtime" HintPath="$(GameManaged)\PhotonRealtime.dll" Private="false" />
-    <Reference Include="PhotonUnityNetworking" HintPath="$(GameManaged)\PhotonUnityNetworking.dll" Private="false" />
-    <Reference Include="UnityEngine" HintPath="$(GameManaged)\UnityEngine.dll" Private="false" />
-    <Reference Include="UnityEngine.CoreModule" HintPath="$(GameManaged)\UnityEngine.CoreModule.dll" Private="false" />
-    <Reference Include="UnityEngine.UIElementsModule" HintPath="$(GameManaged)\UnityEngine.UIElementsModule.dll" Private="false" />
-    <Reference Include="Unity.Localization" HintPath="$(GameManaged)\Unity.Localization.dll" Private="false" />
-  </ItemGroup>
-
-  <Target Name="CheckGameReferences" BeforeTargets="ResolveAssemblyReferences">
-    <Error Condition="!Exists('$(GameManaged)\Assembly-CSharp.dll')" Text="Void Crew not found at '$(VoidCrewDir)'. Build with -p:VoidCrewDir=&quot;&lt;your Void Crew folder&gt;&quot;." />
-    <Error Condition="!Exists('$(BepInExDir)\core\BepInEx.dll')" Text="BepInEx 5 not found at '$(BepInExDir)'. Build with -p:BepInExDir=&quot;&lt;a BepInEx folder with core\BepInEx.dll&gt;&quot;." />
-  </Target>
 </Project>

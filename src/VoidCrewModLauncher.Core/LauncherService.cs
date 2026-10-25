@@ -31,6 +31,15 @@ public sealed class DoorstopConsentNeededException(string gameDirectory)
 {
     public string GameDirectory { get; } = gameDirectory;
 }
+
+/// <summary>The game folder has another install's Doorstop, too old to load the launcher's BepInEx.</summary>
+public sealed class DoorstopOutdatedException(string gameDirectory, string version)
+    : Exception(Loc.F("{0} has an old BepInEx loader (Doorstop {1}) that can't load the launcher's mods.", gameDirectory, version))
+{
+    public string GameDirectory { get; } = gameDirectory;
+    public string Version { get; } = version;
+}
+
 /// <summary>
 /// Everything the launcher does, for the UI to call: the mod library and Thunderstore, building and starting launches,
 /// and the bridge to the running game. UI-free and long-lived; events may come from background threads.
@@ -571,7 +580,8 @@ public sealed class LauncherService : IDisposable
         else if (doorstop.Outdated)
         {
             // An old Doorstop (3.x) from a manual BepInEx install never loads the launcher's BepInEx: the game would start
-            // without mods. Its files are kept next to the new ones.
+            // without mods. It is another install's, so the player says yes once; its files are kept next to the new ones.
+            if (!Settings.ReplaceOutdatedDoorstop) throw new DoorstopOutdatedException(game, doorstop.Version ?? "?");
             Doorstop.ReplaceOutdated(game, bepInExPack);
         }
 

@@ -219,7 +219,9 @@ public static class Doorstop
     /// <summary>
     /// Removes the loader the launcher added (nothing when it isn't the launcher's): winhttp.dll first, then the config
     /// that marks it as ours, then .doorstop_version only if the launcher put it there (its config says so, or it matches
-    /// the copy in one of <paramref name="bepInExPackDirectories"/>). False when something couldn't be deleted.
+    /// the copy in one of <paramref name="bepInExPackDirectories"/>). An outdated loader the launcher's replaced (see
+    /// <see cref="ReplaceOutdated"/>) is put back, so a manual BepInEx install works again. False when something couldn't
+    /// be deleted.
     /// </summary>
     public static bool Remove(string gameDirectory, IEnumerable<string>? bepInExPackDirectories = null)
     {
@@ -241,6 +243,11 @@ public static class Doorstop
             File.Delete(Path.Combine(gameDirectory, ProxyFile));
             File.Delete(configPath);
             if (removeVersion) File.Delete(versionPath);
+            foreach (string name in new[] { ProxyFile, ConfigFile, VersionFile })
+            {
+                string path = Path.Combine(gameDirectory, name);
+                if (File.Exists(path + OldLoaderSuffix) && !File.Exists(path)) File.Move(path + OldLoaderSuffix, path);
+            }
             return true;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)

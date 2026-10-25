@@ -26,6 +26,10 @@ public sealed class LauncherSettings
 
     /// <summary>The player agreed that the launcher may add BepInEx's Doorstop loader to the game folder.</summary>
     public bool DoorstopConsent { get; set; }
+
+    /// <summary>The player agreed that the launcher may replace another install's outdated Doorstop (3.x) with its own.</summary>
+    public bool ReplaceOutdatedDoorstop { get; set; }
+
     /// <summary>At start, look for a new launcher on GitHub and install it.</summary>
     public bool AutoUpdateLauncher { get; set; } = true;
 

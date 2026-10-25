@@ -274,6 +274,14 @@ public partial class App : Application
             MessageBox.Show(Loc.T("The Void Crew Mod Launcher is open. Close it, then run this again to update it."), AppInfo.Name, MessageBoxButton.OK, MessageBoxImage.Information);
             return true;
         }
+        // Say what changes on the PC before anything does (a test install, VCML_INSTALL_ROOT, goes ahead so it can run unattended).
+        if (!InstallLocations.IsTestInstall && !new Dialogs().Confirm(Loc.T("Install the Void Crew Mod Launcher"),
+                Loc.F("The launcher installs for your Windows user in\n{0}\n\nwith shortcuts on the desktop and in the Start menu, and opens voidcrewmod:// links from mod websites. Remove it any time from Windows' Installed apps.",
+                    locations.InstallDirectory),
+                Loc.T("INSTALL")))
+        {
+            return true;
+        }
         try
         {
             Installer.Install(Environment.ProcessPath!, locations, AppInfo.Version);

@@ -1,5 +1,11 @@
 ﻿# Changelog
 
+## 0.9.0
+
+- **Releases are built by GitHub from this repository**, ready for code signing through SignPath (see the code signing policy in the README), so Windows can show who made the setup instead of warning about an unknown app.
+- The setup says where it installs and what it adds (shortcuts, voidcrewmod:// links) and waits for INSTALL before changing anything.
+- An old BepInEx loader (Doorstop 3) from another install is replaced after one REPLACE AND CONTINUE, and removing the launcher's loader puts the old one back, so a manual BepInEx install works again.
+
 ## 0.8.2
 
 - **Local mods in multiplayer:** when the host plays with mods added from their PC (Jack's role and weapon zips, say), players who have the same mods now join with their own copies. The launcher finds them by their plugin, whatever the files are called on each PC and even when they're switched off, and turns them on for that game. Without one, JOIN says which mod (with its plugin id) and that it can't be downloaded: get it from the host or its author.

@@ -1,0 +1,94 @@
+# Builds a release from a version tag (git tag v1.2.3 && git push origin v1.2.3):
+#   1. builds and tests everything on Windows (no game needed: the bridge builds against reference packages),
+#   2. packs VoidCrewModLauncher-Setup.exe,
+#   3. has SignPath sign it (once the SignPath project is set up: the SIGNPATH_* repository variables and the
+#      SIGNPATH_API_TOKEN secret; until then the setup goes out unsigned), which waits for an approver to approve
+#      the signing request on signpath.io,
+#   4. creates a draft GitHub release with the setup and the CHANGELOG section for that version.
+# The draft is published by hand once checked; the launcher's self-update only sees published releases.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Check the tag matches the version
+        shell: pwsh
+        run: |
+          $version = ([xml](Get-Content Directory.Build.props)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+          if ("v$version" -ne "${{ github.ref_name }}") { throw "Tag ${{ github.ref_name }} doesn't match Directory.Build.props ($version)." }
+
+      - name: Build and test
+        shell: pwsh
+        run: ./tools/build-and-test.ps1
+
+      - name: Pack the setup
+        shell: pwsh
+        run: ./tools/package.ps1
+
+      - name: Upload the unsigned setup
+        id: unsigned
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-setup
+          path: dist/VoidCrewModLauncher-Setup.exe
+          if-no-files-found: error
+
+      - name: Sign with SignPath
+        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          connector-url: https://pipelineconnector.connectors.signpath.io/GitHub/GitHubCom
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 86400
+          output-artifact-directory: signed
+
+      - name: Use the signed setup
+        if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+        shell: pwsh
+        run: |
+          $signed = Get-ChildItem signed -Recurse -Filter VoidCrewModLauncher-Setup.exe | Select-Object -First 1
+          if (-not $signed) { throw "SignPath returned no VoidCrewModLauncher-Setup.exe." }
+          $signature = Get-AuthenticodeSignature $signed.FullName
+          if ($signature.Status -ne "Valid") { throw "The signed setup's signature is $($signature.Status)." }
+          Copy-Item $signed.FullName dist/VoidCrewModLauncher-Setup.exe -Force
+
+      - name: Draft the GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          $lines = Get-Content CHANGELOG.md
+          $start = [Array]::IndexOf($lines, "## $version")
+          $notes = @()
+          if ($start -ge 0) {
+              for ($i = $start + 1; $i -lt $lines.Count -and -not $lines[$i].StartsWith("## "); $i++) { $notes += $lines[$i] }
+          }
+          $notes += ""
+          $notes += "## Install"
+          $notes += "- **Have 0.2.0 or newer:** close and reopen the launcher; it offers this update itself."
+          $notes += "- **New:** download ``VoidCrewModLauncher-Setup.exe`` (below) and double-click it."
+          $notes += ""
+          $notes += "[Code signing policy](https://github.com/${{ github.repository }}#code-signing-policy)"
+          Set-Content notes.md ($notes -join "`n") -Encoding utf8
+          gh release create "${{ github.ref_name }}" dist/VoidCrewModLauncher-Setup.exe --draft --title $version --notes-file notes.md
