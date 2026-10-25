@@ -20,7 +20,8 @@ if ($LASTEXITCODE -ne 0) { throw "Tests failed." }
 
 # The bridge only hooks a handful of the game's methods; make sure they're all still there in this game version.
 if (-not $VoidCrewDir) { $VoidCrewDir = "G:\SteamLibrary\steamapps\common\Void Crew" }
-$assembly = Join-Path $VoidCrewDir "Void Crew_Data\Managed\Assembly-CSharp.dll"
+# Path.Combine, not Join-Path: Join-Path fails outright when the drive isn't there (GitHub's machines have no G:).
+$assembly = [System.IO.Path]::Combine($VoidCrewDir, "Void Crew_Data\Managed\Assembly-CSharp.dll")
 if (-not (Test-Path $assembly)) {
     # GitHub's release build has no game: the bridge builds against reference packages, and the hooks are checked on
     # a PC with Void Crew before each release.
@@ -40,7 +41,7 @@ $checks = @(
 )
 $fields = @(@("MatchMakingMenu", "_roomNameField"), @("MatchMakingMenu", "_playerLimit"), @("MatchmakingController", "_cachedMatchmakingRooms"))
 # In ResourceAssets.dll: the game's own mod check, which the bridge reads to list the mods joining players need.
-$resourceAssets = Join-Path $VoidCrewDir "Void Crew_Data\Managed\ResourceAssets.dll"
+$resourceAssets = [System.IO.Path]::Combine($VoidCrewDir, "Void Crew_Data\Managed\ResourceAssets.dll")
 $assetChecks = @(
     @("ResourceAssets.RuntimeAssetsRegister", "RegisterAsset"), @("ResourceAssets.RuntimeAssetsRegister", "RegisterExternalMod"),
     @("ResourceAssets.RuntimeAssetsRegister", "AddAssetEffect"), @("ResourceAssets.RuntimeAssetsRegister", "GetRequiredAssets"),
