@@ -118,6 +118,11 @@ public sealed class JoinPlanner
                 {
                     plan.Warnings.Add(Loc.F("{0} {1} isn't on Thunderstore. You'll need to get it yourself.", mod.DisplayName, mod.Version));
                 }
+                else if (needed && mod.Package is { ListingRejected: true } && version != null)
+                {
+                    // Brought in from the mod's GitHub releases (only for authors the launcher knows): say where it comes from.
+                    plan.Warnings.Add(Loc.F("Thunderstore rejected {0}'s Void Crew listing: the launcher gets {1} from the mod's GitHub releases.", mod.DisplayName, version.VersionNumber));
+                }
             }
 
             plan.Lines.Add(new JoinPlanLine
@@ -197,13 +202,18 @@ public sealed class JoinPlanner
             : Loc.F("{0} is the host's local mod: it can't be downloaded. Get it from the host or its author.", label);
     }
 
-    /// <summary>The mods to launch with for <paramref name="plan"/>, as the player left the ticks.</summary>
+    /// <summary>
+    /// The mods to launch with for <paramref name="plan"/>, as the player left the ticks. Mods that come from the store
+    /// as they are (your copies of the host's local mods, your local mods that stay on) bring the dependencies their
+    /// manifests name, and a copy of a plugin BepInEx wouldn't load is left out, as when you play.
+    /// </summary>
     public ResolvedJoin Resolve(JoinPlan plan)
     {
         var resolved = new ResolvedJoin();
         var roots = new List<(TsPackage, TsVersion)>();
         var pinned = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var needs = new Dictionary<string, ModNeed>(StringComparer.OrdinalIgnoreCase);
+        var fromStore = new List<InstalledMod>();
 
         foreach (JoinPlanLine line in plan.Lines.Where(l => l.Include && l.Mod.Package != null && l.Version != null))
         {
@@ -226,42 +236,60 @@ public sealed class JoinPlanner
                 continue;
             }
             string folder = _manager.Store.VersionDirectory(copy.Id, copy.Version);
-            if (Directory.Exists(folder)) resolved.Mods.Add(new RuntimeMod(copy.Id, copy.Name, copy.Version, folder, copy.IsLocal, line.Mod.Need));
+            if (!Directory.Exists(folder)) continue;
+            resolved.Mods.Add(new RuntimeMod(copy.Id, copy.Name, copy.Version, folder, copy.IsLocal, line.Mod.Need));
+            fromStore.Add(copy);
         }
         foreach (InstalledMod mod in plan.Kept)
         {
             if (mod.IsLocal)
             {
                 string folder = _manager.Store.VersionDirectory(mod.Id, mod.Version);
-                if (Directory.Exists(folder)) resolved.Mods.Add(new RuntimeMod(mod.Id, mod.Name, mod.Version, folder, true, ModNeed.ClientOnly));
+                if (!Directory.Exists(folder)) continue;
+                resolved.Mods.Add(new RuntimeMod(mod.Id, mod.Name, mod.Version, folder, true, ModNeed.ClientOnly));
+                fromStore.Add(mod);
                 continue;
             }
             TsPackage? package = _manager.Index.Find(mod.Id);
             TsVersion? version = package?.Version(mod.Version);
             if (package == null || version == null || pinned.ContainsKey(package.FullName))
             {
-                if (package == null || version == null) AddInstalled(resolved, mod);
+                if ((package == null || version == null) && AddInstalled(resolved, mod)) fromStore.Add(mod);
                 continue;
             }
             roots.Add((package, version));
             needs[package.FullName] = mod.GuessedNeed;
         }
+        // After the lobby's and your own, so a version either of them loads is the one used.
+        foreach (InstalledMod mod in fromStore) roots.AddRange(_manager.DependencyRoots(mod, pinned));
 
         foreach ((TsPackage package, TsVersion version) in _manager.Resolve(roots, pinned))
         {
+            // Already in from the store (a copy Thunderstore no longer lists): not a second version next to it.
+            if (resolved.Mods.Any(m => string.Equals(m.Id, package.FullName, StringComparison.OrdinalIgnoreCase))) continue;
             string folder = _manager.Store.VersionDirectory(package.FullName, version.VersionNumber);
             if (!_manager.Store.Has(package.FullName, version.VersionNumber)) resolved.Downloads.Add((package, version));
             ModNeed need = needs.TryGetValue(package.FullName, out ModNeed known) ? known : ModPolicy.GuessNeed(package.FullName, package.Categories);
             resolved.Mods.Add(new RuntimeMod(package.FullName, package.Name, version.VersionNumber, folder, false, need));
         }
+
+        List<RuntimeMod> kept = _manager.WithoutDuplicatePlugins(resolved.Mods);
+        if (kept.Count < resolved.Mods.Count)
+        {
+            resolved.Downloads.RemoveAll(d => !kept.Any(m => string.Equals(m.Id, d.Package.FullName, StringComparison.OrdinalIgnoreCase) && VersionNumber.Same(m.Version, d.Version.VersionNumber)));
+            resolved.Mods.Clear();
+            resolved.Mods.AddRange(kept);
+        }
         return resolved;
     }
 
-    /// <summary>An installed mod Thunderstore no longer lists: use the copy in the store.</summary>
-    private void AddInstalled(ResolvedJoin resolved, InstalledMod mod)
+    /// <summary>An installed mod Thunderstore no longer lists: use the copy in the store. False when it isn't there.</summary>
+    private bool AddInstalled(ResolvedJoin resolved, InstalledMod mod)
     {
         string folder = _manager.Store.VersionDirectory(mod.Id, mod.Version);
-        if (Directory.Exists(folder)) resolved.Mods.Add(new RuntimeMod(mod.Id, mod.Name, mod.Version, folder, mod.IsLocal, mod.GuessedNeed));
+        if (!Directory.Exists(folder)) return false;
+        resolved.Mods.Add(new RuntimeMod(mod.Id, mod.Name, mod.Version, folder, mod.IsLocal, mod.GuessedNeed));
+        return true;
     }
 
     /// <summary>

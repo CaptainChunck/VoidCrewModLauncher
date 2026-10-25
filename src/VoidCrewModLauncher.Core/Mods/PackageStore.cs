@@ -34,30 +34,33 @@ public sealed class PackageStore
         return Directory.Exists(dir) ? Directory.GetDirectories(dir).Select(Path.GetFileName).OfType<string>().Where(v => !v.StartsWith('.')) : Enumerable.Empty<string>();
     }
 
-    /// <summary>Downloads and unpacks one version (from Thunderstore or GitHub) unless it's already in the store; returns its folder.</summary>
+    /// <summary>
+    /// Downloads and unpacks one version (from Thunderstore or GitHub) unless it's already in the store; returns its folder.
+    /// The download and the file work run off the caller's thread (the UI's when a player installs).
+    /// </summary>
     public async Task<string> EnsureAsync(TsVersion version, IProgress<double>? progress = null, CancellationToken cancel = default)
     {
-        PackageReference reference = PackageReference.Parse(version.FullName) ?? throw new InvalidDataException(Loc.F("Not a package version: {0}", version.FullName));
+        PackageReference reference = PackageReference.Parse(version.FullName) ?? throw new InvalidDataException(Loc.F("Not a package version: {0}", version.FullName)).InEnglish();
         string target = VersionDirectory(reference.Id, version.VersionNumber);
         if (Directory.Exists(target)) return target;
         // Plugin DLLs from a GitHub release go into the files of a Thunderstore version, which is needed first.
-        if (version.GitHub is { Package: null, Base: { } basis }) await EnsureAsync(basis, null, cancel);
+        if (version.GitHub is { Package: null, Base: { } basis }) await EnsureAsync(basis, null, cancel).ConfigureAwait(false);
 
-        await _gate.WaitAsync(cancel);
+        await _gate.WaitAsync(cancel).ConfigureAwait(false);
         try
         {
             if (Directory.Exists(target)) return target;
             if (version.GitHub is { } github)
             {
-                await AddFromGitHubAsync(reference, version, github, target, progress, cancel);
+                await AddFromGitHubAsync(reference, version, github, target, progress, cancel).ConfigureAwait(false);
                 return target;
             }
             AppLog.Info($"Downloading {version.FullName}.");
-            string zip = await _thunderstore.DownloadAsync(version, progress, cancel);
+            string zip = await _thunderstore.DownloadAsync(version, progress, cancel).ConfigureAwait(false);
             try
             {
-                if (version.Sha256 != null) await CheckSha256Async(zip, version, cancel);
-                await Task.Run(() => Unpack(zip, target), cancel);
+                if (version.Sha256 != null) await CheckSha256Async(zip, version, cancel).ConfigureAwait(false);
+                await Task.Run(() => Unpack(zip, target), cancel).ConfigureAwait(false);
             }
             finally
             {
@@ -77,17 +80,17 @@ public sealed class PackageStore
     /// </summary>
     private async Task AddFromGitHubAsync(PackageReference reference, TsVersion version, GitHubSource github, string target, IProgress<double>? progress, CancellationToken cancel)
     {
-        if (_github == null) throw new InvalidOperationException(Loc.T("GitHub downloads aren't available here."));
+        if (_github == null) throw new InvalidOperationException(Loc.T("GitHub downloads aren't available here.")).InEnglish();
         AppLog.Info($"Downloading {version.FullName} from GitHub ({github.ReleaseUrl}).");
         if (github.Package != null)
         {
-            string zip = await _github.DownloadAsync(github.Package, progress, cancel);
+            string zip = await _github.DownloadAsync(github.Package, progress, cancel).ConfigureAwait(false);
             try
             {
                 Action<string> check = github.PluginGuidPrefix is { } prefix
                     ? folder => CheckPlugin(folder, prefix, reference, version)
                     : folder => CheckManifest(folder, reference, version);
-                await Task.Run(() => Unpack(zip, target, check), cancel);
+                await Task.Run(() => Unpack(zip, target, check), cancel).ConfigureAwait(false);
             }
             finally
             {
@@ -103,10 +106,10 @@ public sealed class PackageStore
         {
             FileTools.DeleteDirectory(temp);
             CopyDirectory(basis, temp);
-        }, cancel);
+        }, cancel).ConfigureAwait(false);
         foreach (GitHubAsset plugin in github.Plugins)
         {
-            string file = await _github.DownloadAsync(plugin, progress, cancel);
+            string file = await _github.DownloadAsync(plugin, progress, cancel).ConfigureAwait(false);
             try
             {
                 await Task.Run(() =>
@@ -116,10 +119,10 @@ public sealed class PackageStore
                     if (same.Count == 0)
                     {
                         FileTools.DeleteDirectory(temp);
-                        throw new InvalidDataException(Loc.F("{0} in {1}'s release isn't a file of {2}; not using that release.", plugin.Name, github.Repo, reference.Id));
+                        throw new InvalidDataException(Loc.F("{0} in {1}'s release isn't a file of {2}; not using that release.", plugin.Name, github.Repo, reference.Id)).InEnglish();
                     }
                     foreach (string existing in same) FileTools.CopyFile(file, existing);
-                }, cancel);
+                }, cancel).ConfigureAwait(false);
             }
             finally
             {
@@ -134,18 +137,18 @@ public sealed class PackageStore
     private static void CheckManifest(string folder, PackageReference reference, TsVersion version)
     {
         string manifest = Path.Combine(folder, "manifest.json");
-        if (!File.Exists(manifest)) throw new InvalidDataException(Loc.F("The GitHub release of {0} {1} has no manifest.json; not using it.", reference.Id, version.VersionNumber));
+        if (!File.Exists(manifest)) throw new InvalidDataException(Loc.F("The GitHub release of {0} {1} has no manifest.json; not using it.", reference.Id, version.VersionNumber)).InEnglish();
         using JsonDocument document = JsonDocument.Parse(File.ReadAllText(manifest));
         JsonElement root = document.RootElement;
         string? name = root.TryGetProperty("name", out JsonElement n) && n.ValueKind == JsonValueKind.String ? n.GetString() : null;
         string? number = root.TryGetProperty("version_number", out JsonElement v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
         if (!string.Equals(name, reference.Name, StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidDataException(Loc.F("The GitHub release's package is {0}, not {1}; not using it.", name, reference.Name));
+            throw new InvalidDataException(Loc.F("The GitHub release's package is {0}, not {1}; not using it.", name, reference.Name)).InEnglish();
         }
         if (!VersionNumber.Same(number, version.VersionNumber))
         {
-            throw new InvalidDataException(Loc.F("The GitHub release {0} of {1} has a package saying {2}; not using it.", version.VersionNumber, reference.Name, number));
+            throw new InvalidDataException(Loc.F("The GitHub release {0} of {1} has a package saying {2}; not using it.", version.VersionNumber, reference.Name, number)).InEnglish();
         }
         if (root.TryGetProperty("dependencies", out JsonElement dependencies) && dependencies.ValueKind == JsonValueKind.Array)
         {
@@ -157,10 +160,10 @@ public sealed class PackageStore
     private static async Task CheckSha256Async(string file, TsVersion version, CancellationToken cancel)
     {
         await using FileStream stream = File.OpenRead(file);
-        string actual = Convert.ToHexString(await System.Security.Cryptography.SHA256.HashDataAsync(stream, cancel)).ToLowerInvariant();
+        string actual = Convert.ToHexString(await System.Security.Cryptography.SHA256.HashDataAsync(stream, cancel).ConfigureAwait(false)).ToLowerInvariant();
         if (actual != version.Sha256)
         {
-            throw new InvalidDataException(Loc.F("{0} doesn't match the checksum its site lists; not installing it.", version.FullName));
+            throw new InvalidDataException(Loc.F("{0} doesn't match the checksum its site lists; not installing it.", version.FullName)).InEnglish();
         }
     }
 
@@ -169,7 +172,7 @@ public sealed class PackageStore
     {
         if (!PluginScanner.ScanDirectory(folder).Any(p => p.Guid.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
         {
-            throw new InvalidDataException(Loc.F("The GitHub release {0} of {1} has no {2} plugin; not using it.", version.VersionNumber, reference.Name, prefix));
+            throw new InvalidDataException(Loc.F("The GitHub release {0} of {1} has no {2} plugin; not using it.", version.VersionNumber, reference.Name, prefix)).InEnglish();
         }
     }
 
@@ -209,7 +212,7 @@ public sealed class PackageStore
             foreach (ZipArchiveEntry entry in archive.Entries) declared += entry.Length;
             if (archive.Entries.Count > maxEntries || declared > maxBytes)
             {
-                throw new InvalidDataException(Loc.F("{0} is too big to be a mod ({1} files, {2} MB); not installing it.", Path.GetFileName(zip), archive.Entries.Count, declared / (1024 * 1024)));
+                throw new InvalidDataException(Loc.F("{0} is too big to be a mod ({1} files, {2} MB); not installing it.", Path.GetFileName(zip), archive.Entries.Count, declared / (1024 * 1024))).InEnglish();
             }
 
             Directory.CreateDirectory(temp);
@@ -225,7 +228,7 @@ public sealed class PackageStore
                     string destination = Path.GetFullPath(Path.Combine(temp, name));
                     if (!destination.StartsWith(root, StringComparison.OrdinalIgnoreCase))
                     {
-                        throw new InvalidDataException(Loc.F("{0} has a file that would be written outside its folder ({1}); not installing it.", Path.GetFileName(zip), entry.FullName));
+                        throw new InvalidDataException(Loc.F("{0} has a file that would be written outside its folder ({1}); not installing it.", Path.GetFileName(zip), entry.FullName)).InEnglish();
                     }
                     if (name.EndsWith('/'))
                     {
@@ -241,7 +244,7 @@ public sealed class PackageStore
                         while ((read = input.Read(buffer, 0, buffer.Length)) > 0)
                         {
                             written += read;
-                            if (written > maxBytes) throw new InvalidDataException(Loc.F("{0} unpacks to more than {1} MB; not installing it.", Path.GetFileName(zip), maxBytes / (1024 * 1024)));
+                            if (written > maxBytes) throw new InvalidDataException(Loc.F("{0} unpacks to more than {1} MB; not installing it.", Path.GetFileName(zip), maxBytes / (1024 * 1024))).InEnglish();
                             output.Write(buffer, 0, read);
                         }
                     }

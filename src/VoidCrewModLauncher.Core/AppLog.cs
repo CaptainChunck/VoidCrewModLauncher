@@ -35,8 +35,9 @@ public static class AppLog
 
     public static void Warn(string message) => Write("WARN", message);
 
+    /// <summary>An error, with the exception in full; a message the player read in their language is written in English (see Loc.InEnglish).</summary>
     public static void Error(string message, Exception? exception = null) =>
-        Write("ERROR", exception == null ? message : $"{message}: {exception}");
+        Write("ERROR", exception == null ? message : $"{message}: {Loc.LogText(exception)}");
 
     private static void Write(string level, string message)
     {

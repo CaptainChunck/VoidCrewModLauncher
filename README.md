@@ -45,7 +45,8 @@ it hosts lobbies with your mods in one click.
     stay on by default), or only load it when the lobby runs it.
   - **IMPORT FROM BEPINEX** brings in the mods you already use from another BepInEx folder (Rai Pal, r2modman or a
     manual install), installing Thunderstore's copy or copying your own build, with their settings files.
-  - **ADD MOD FILE** adds a DLL or zip that isn't on Thunderstore.
+  - **ADD MOD FILE** adds a DLL or zip that isn't on Thunderstore. The Thunderstore mods a zip's manifest.json lists as
+    dependencies load with it, as they do for a Thunderstore mod.
 - **MODS**: every Void Crew mod on Thunderstore, with search, categories, sorting, downloads and
   ratings, the mod's README, and one-click install with dependencies.
 - **Updates**: at start (and on REFRESH) installed mods update to their newest versions. Each mod is checked with
@@ -166,7 +167,10 @@ the setup first: `https://github.com/CaptainChunck/VoidCrewModLauncher/releases/
   `vcml1;Namespace-Name@1.2.3!R;Namespace-Other@0.4.0!C;#LocalMod@1.0!R:plugin.guid`, where the letter is what joining
   players need: `R` everyone, `S` session (the room must be modded, joiners don't need it), `H` host only,
   `C` client-side, `?` unknown. `#` marks a mod that isn't on Thunderstore; its BepInEx plugin GUIDs follow the letter
-  after a colon (from launcher 0.8.1; older launchers read only the letter).
+  after a colon (from launcher 0.8.2; older launchers read only the letter). An advert has room for 64 mods and 2000
+  characters: when a host has more, the mods everyone needs go first and local mods' GUIDs only where there is room,
+  and the advert ends with an empty entry (`;`) to say mods were left out; launchers after 0.9.1 then also take the
+  VoidManager "All" mods it has no room for (those they find on Thunderstore) from VoidManager's list.
 - VoidManager mods are read from VoidManager's `Mods` lobby property; set `ThunderstoreID` on your `VoidPlugin` so the
   launcher can match your mod to its Thunderstore package even when its plugin name differs. The launcher also reads
   your `VoidPlugin`'s `MPType` from the DLL (when it returns a constant): an `All` mod is needed by everyone, and stays
@@ -193,7 +197,8 @@ the setup first: `https://github.com/CaptainChunck/VoidCrewModLauncher/releases/
 - `--data-dir <folder>` (or the `VCML_DATA_DIR` environment variable) runs the launcher with a separate data folder.
 - To try the install or the self-update without touching your real install: `VCML_INSTALL_ROOT=<folder>` installs into
   that folder (and a test registry key), and `VCML_UPDATE_FEED=<url>` reads the release from that URL (GitHub's release
-  JSON) instead of GitHub.
+  JSON) instead of GitHub. They work in published builds too (that is what they test); the launcher's log says when
+  `VCML_UPDATE_FEED` or `VCML_SITE_URL` is in use.
 
 ## Code signing policy
 

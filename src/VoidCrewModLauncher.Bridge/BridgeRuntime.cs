@@ -158,14 +158,14 @@ namespace VoidCrewModLauncher.Bridge
                 case MessageTypes.Join:
                 {
                     var command = Json.Read<JoinCommand>(message);
-                    string error = Actions.Join(command);
-                    if (error != null) Send(new JoinResultMessage { RoomId = command.RoomId, Ok = false, Error = error });
+                    ActionError error = Actions.Join(command);
+                    if (error != null) Send(Actions.JoinResult(command != null ? command.RoomId : null, false, error));
                     break;
                 }
                 case MessageTypes.Host:
                 {
-                    string error = Actions.Host(Json.Read<HostCommand>(message));
-                    if (error != null) Send(new HostResultMessage { Ok = false, Error = error });
+                    ActionError error = Actions.Host(Json.Read<HostCommand>(message));
+                    if (error != null) Send(Actions.HostResult(false, error));
                     break;
                 }
                 case MessageTypes.SetRegion:
@@ -210,17 +210,19 @@ namespace VoidCrewModLauncher.Bridge
             {
                 ExitGames.Client.Photon.Hashtable properties = pair.Value.CustomProperties;
                 if (!properties.ContainsKey("R_Db") || properties.ContainsKey(LobbyAdvert.PropertyKey) || properties.ContainsKey(GameInfo.VoidManagerModsKey)) continue;
-                int kind = Math.Abs(pair.Key.GetHashCode()) % 3;
+                // Without the sign bit: Math.Abs throws for int.MinValue.
+                int kind = (pair.Key.GetHashCode() & int.MaxValue) % 3;
                 if (kind == 0) properties[LobbyAdvert.PropertyKey] = DebugAdvert;
                 else if (kind == 1) properties[GameInfo.VoidManagerModsKey] = DebugVoidManagerList();
                 else properties["R_Mod"] = ModdingType.mod_session;
             }
         }
 
+        /// <summary>Sample mods at released versions (any version on Thunderstore works; the launcher looks it up).</summary>
         private static readonly string DebugAdvert = LobbyAdvert.Encode(new[]
         {
-            new AdvertMod { Id = "Captain_Chuncks_Mods-Void_Crew_Fleet", Version = "0.3.0", Need = ModNeed.Everyone },
-            new AdvertMod { Id = "Captain_Chuncks_Mods-Void_Crew_VR_UI_Fix", Version = "3.14.1", Need = ModNeed.ClientOnly },
+            new AdvertMod { Id = "Captain_Chuncks_Mods-Void_Crew_Fleet", Version = "0.4.6", Need = ModNeed.Everyone },
+            new AdvertMod { Id = "Captain_Chuncks_Mods-Void_Crew_VR_UI_Fix", Version = "3.15.1", Need = ModNeed.ClientOnly },
         });
 
         private static byte[] DebugVoidManagerList()
@@ -251,14 +253,14 @@ namespace VoidCrewModLauncher.Bridge
             if (!GameInfo.MenuReady()) return;
             _autoDone = true;
 
-            string error;
+            ActionError error;
             if (Launch.Join != null)
             {
                 error = Actions.Join(Launch.Join);
                 if (error != null)
                 {
-                    Log.Warn("Could not join the launcher's lobby: " + error);
-                    Send(new JoinResultMessage { RoomId = Launch.Join.RoomId, Ok = false, Error = error });
+                    Log.Warn("Could not join the launcher's lobby: " + error.Message);
+                    Send(Actions.JoinResult(Launch.Join.RoomId, false, error));
                 }
             }
             else
@@ -266,8 +268,8 @@ namespace VoidCrewModLauncher.Bridge
                 error = Actions.Host(Launch.Host);
                 if (error != null)
                 {
-                    Log.Warn("Could not host the launcher's lobby: " + error);
-                    Send(new HostResultMessage { Ok = false, Error = error });
+                    Log.Warn("Could not host the launcher's lobby: " + error.Message);
+                    Send(Actions.HostResult(false, error));
                 }
             }
         }

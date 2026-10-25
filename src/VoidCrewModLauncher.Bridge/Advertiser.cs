@@ -152,7 +152,14 @@ namespace VoidCrewModLauncher.Bridge
             }
             _required = required;
             _requiredByGame = requiredByGame;
-            _advert = LobbyAdvert.Encode(mods);
+            List<AdvertMod> leftOut;
+            _advert = LobbyAdvert.Encode(mods, out leftOut);
+            if (leftOut.Count > 0)
+            {
+                // The mods everyone needs went in first; launchers that read the advert set up only what it lists.
+                Log.Warn("Your lobby's mod list is full: it lists " + (mods.Count - leftOut.Count) + " of your " + mods.Count + " mods. Left out: " +
+                         string.Join(", ", leftOut.Select(m => m.Id + " " + m.Version).ToArray()) + ".");
+            }
             return _advert;
         }
 

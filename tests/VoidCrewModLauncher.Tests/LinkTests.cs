@@ -3,6 +3,7 @@ using VoidCrewModLauncher.Core.Setup;
 
 namespace VoidCrewModLauncher.Tests;
 
+[Collection(TestRegistryCollection.Name)]
 public class LinkTests
 {
     [Fact]
@@ -24,22 +25,16 @@ public class LinkTests
     [Fact]
     public void Registration_points_links_at_the_launcher_and_uninstall_removes_it()
     {
-        string classes = @"Software\VoidCrewModLauncherTests\" + Guid.NewGuid().ToString("N");
-        try
+        using var test = new TestRegistryKey();
+        string classes = test.Path;
+        LauncherLinks.Register(@"C:\Launcher\VoidCrewModLauncher.exe", classes);
+        Assert.True(LauncherLinks.IsRegistered(@"C:\Launcher\VoidCrewModLauncher.exe", classes));
+        using (RegistryKey key = Registry.CurrentUser.OpenSubKey($@"{classes}\voidcrewmod")!)
         {
-            LauncherLinks.Register(@"C:\Launcher\VoidCrewModLauncher.exe", classes);
-            Assert.True(LauncherLinks.IsRegistered(@"C:\Launcher\VoidCrewModLauncher.exe", classes));
-            using (RegistryKey key = Registry.CurrentUser.OpenSubKey($@"{classes}\voidcrewmod")!)
-            {
-                Assert.Equal("", key.GetValue("URL Protocol"));
-            }
-            LauncherLinks.Unregister(classes);
-            Assert.False(LauncherLinks.IsRegistered(@"C:\Launcher\VoidCrewModLauncher.exe", classes));
+            Assert.Equal("", key.GetValue("URL Protocol"));
         }
-        finally
-        {
-            Registry.CurrentUser.DeleteSubKeyTree(classes, false);
-        }
+        LauncherLinks.Unregister(classes);
+        Assert.False(LauncherLinks.IsRegistered(@"C:\Launcher\VoidCrewModLauncher.exe", classes));
     }
 
     [Fact]

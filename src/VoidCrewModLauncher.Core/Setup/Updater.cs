@@ -16,7 +16,11 @@ public sealed class Updater : IDisposable
 {
     public const string LatestReleaseApi = "https://api.github.com/repos/CaptainChunck/VoidCrewModLauncher/releases/latest";
 
-    /// <summary>Set to another release feed (a URL with the same JSON as GitHub's) to try an update locally.</summary>
+    /// <summary>
+    /// Set to another release feed (a URL with the same JSON as GitHub's) to try an update locally, also with a published
+    /// build (README, "Building from source"). Whatever can set it can already change the launcher's files, so it stays in
+    /// every build; the log says when it is in use, and the setup it brings must still be this launcher at that version.
+    /// </summary>
     public const string FeedVariable = "VCML_UPDATE_FEED";
 
     private readonly HttpClient _http;
@@ -29,13 +33,21 @@ public sealed class Updater : IDisposable
         _http.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
     }
 
+    /// <summary>A download fails when nothing arrives for this long (the client's timeout doesn't cover reading the body).</summary>
+    internal TimeSpan StallTimeout { get; set; } = TimeSpan.FromSeconds(30);
+
     /// <summary>Where downloaded setups wait to be installed.</summary>
     public static string DownloadFolder => Path.Combine(Path.GetTempPath(), "VoidCrewModLauncher-update");
 
     /// <summary>The latest release when it is newer than <paramref name="currentVersion"/>, else null. Network errors throw.</summary>
     public async Task<LauncherRelease?> CheckAsync(string currentVersion, CancellationToken cancel = default)
     {
-        string feed = Environment.GetEnvironmentVariable(FeedVariable) is { Length: > 0 } custom ? custom : LatestReleaseApi;
+        string feed = LatestReleaseApi;
+        if (Environment.GetEnvironmentVariable(FeedVariable) is { Length: > 0 } custom)
+        {
+            feed = custom;
+            AppLog.Warn($"{FeedVariable} is set: looking for a new launcher at {custom} instead of GitHub.");
+        }
         using JsonDocument release = JsonDocument.Parse(await _http.GetStringAsync(feed, cancel));
         return Parse(release.RootElement, currentVersion);
     }
@@ -63,7 +75,7 @@ public sealed class Updater : IDisposable
 
     /// <summary>
     /// Downloads the release's setup into <see cref="DownloadFolder"/> and checks its size and SHA-256 (when GitHub gives
-    /// one). Returns the file; throws when it doesn't match.
+    /// one). Returns the file; throws when it doesn't match, or when the download stalls.
     /// </summary>
     public async Task<string> DownloadAsync(LauncherRelease release, IProgress<(long Done, long Total)>? progress, CancellationToken cancel = default)
     {
@@ -72,33 +84,41 @@ public sealed class Updater : IDisposable
         string part = target + ".part";
         using (var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256))
         {
-            long done = 0;
-            using (HttpResponseMessage response = await _http.GetAsync(release.DownloadUrl, HttpCompletionOption.ResponseHeadersRead, cancel))
+            long done;
+            try
             {
+                using HttpResponseMessage response = await _http.GetAsync(release.DownloadUrl, HttpCompletionOption.ResponseHeadersRead, cancel).ConfigureAwait(false);
                 response.EnsureSuccessStatusCode();
                 long total = response.Content.Headers.ContentLength ?? release.Size;
-                await using Stream source = await response.Content.ReadAsStreamAsync(cancel);
+                await using Stream source = await response.Content.ReadAsStreamAsync(cancel).ConfigureAwait(false);
                 await using FileStream file = File.Create(part);
-                var buffer = new byte[81920];
-                int read;
-                while ((read = await source.ReadAsync(buffer, cancel)) > 0)
+                // With the stall watchdog of mod downloads; the window shows the progress about ten times a second.
+                done = await ThunderstoreClient.CopyAsync(source, file, StallTimeout, (buffer, read, _) => hash.AppendData(buffer, 0, read),
+                    sofar => progress?.Report((sofar, total)), cancel).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Stalled, cut off or cancelled: nothing half-downloaded is left behind.
+                try
                 {
-                    await file.WriteAsync(buffer.AsMemory(0, read), cancel);
-                    hash.AppendData(buffer, 0, read);
-                    done += read;
-                    progress?.Report((done, total));
+                    File.Delete(part);
                 }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                {
+                    // CleanUp removes it after the next update.
+                }
+                throw;
             }
             if (release.Size > 0 && done != release.Size)
             {
                 File.Delete(part);
-                throw new InvalidDataException(Loc.F("The download is {0:N0} bytes; GitHub says {1:N0}.", done, release.Size));
+                throw new InvalidDataException(Loc.F("The download is {0:N0} bytes; GitHub says {1:N0}.", done, release.Size)).InEnglish();
             }
             string actual = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
             if (release.Sha256 != null && actual != release.Sha256)
             {
                 File.Delete(part);
-                throw new InvalidDataException(Loc.T("The download doesn't match the checksum GitHub lists for it."));
+                throw new InvalidDataException(Loc.T("The download doesn't match the checksum GitHub lists for it.")).InEnglish();
             }
         }
         File.Move(part, target, true);
@@ -110,8 +130,8 @@ public sealed class Updater : IDisposable
     {
         FileVersionInfo info = FileVersionInfo.GetVersionInfo(exe);
         string found = $"{info.FileMajorPart}.{info.FileMinorPart}.{info.FileBuildPart}";
-        if (info.ProductName != AppInfo.Name) throw new InvalidDataException(Loc.F("The download isn't the {0}.", AppInfo.Name));
-        if (!VersionNumber.Same(found, version)) throw new InvalidDataException(Loc.F("The download is version {0}, not {1}.", found, version));
+        if (info.ProductName != AppInfo.Name) throw new InvalidDataException(Loc.F("The download isn't the {0}.", AppInfo.Name)).InEnglish();
+        if (!VersionNumber.Same(found, version)) throw new InvalidDataException(Loc.F("The download is version {0}, not {1}.", found, version)).InEnglish();
     }
 
     /// <summary>Deletes setups left from earlier updates (one still running is skipped and goes next time).</summary>

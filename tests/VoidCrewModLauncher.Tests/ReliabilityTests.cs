@@ -200,27 +200,72 @@ public class ReliabilityTests
     {
         using var temp = new TempFolder();
         const string Api = GitHubClient.Api;
-        var repo = new GitHubRepo("a", "b");
         TsPackage package = Packages.Make("a", "b", new[] { "0.1.0" });
+        string Releases(string repo) => $"{Api}/repos/a/{repo}/releases?per_page={GitHubClient.ReleasesLookedUp}";
         var http = new FakeHttp()
             .On(Api + "/repos/a/b/releases/latest", "[1,2]")
-            .On(Api + "/repos/a/b/releases/tags/v1.0.0", "[]")
-            .On(Api + "/repos/a/b/releases/tags/v2.0.0", "{\"tag_name\":\"v2.0.0\",\"assets\":[1,\"x\",null,[]]}")
-            .On(Api + "/repos/a/b/releases/tags/v3.0.0", "<html>not json</html>");
+            .On(Releases("object"), "{\"tag_name\":\"v1.0.0\"}")
+            .On(Releases("junk"), "[1,\"x\",null,[],{\"tag_name\":7},{\"tag_name\":\"v2.0.0\",\"assets\":[1,\"x\",null,[]]}]")
+            .On(Releases("html"), "<html>not json</html>");
         using var client = new GitHubClient(temp.AppPaths(), http);
 
-        Assert.Null(await client.GetLatestReleaseAsync(repo, package));
-        Assert.Null(await client.GetReleaseAsync(repo, package, "1.0.0"));
-        Assert.Null(await client.GetReleaseAsync(repo, package, "2.0.0"));
-        Assert.Null(await client.GetReleaseAsync(repo, package, "3.0.0"));
+        Assert.Null(await client.GetLatestReleaseAsync(new GitHubRepo("a", "b"), package));
+        Assert.Null(await client.GetReleaseAsync(new GitHubRepo("a", "object"), package, "1.0.0"));
+        Assert.Null(await client.GetReleaseAsync(new GitHubRepo("a", "junk"), package, "2.0.0"));
+        Assert.Null(await client.GetReleaseAsync(new GitHubRepo("a", "html"), package, "3.0.0"));
         // Not cached: asked again, still no exception.
-        Assert.Null(await client.GetReleaseAsync(repo, package, "3.0.0"));
+        int html = http.Requests.Count(r => r == Releases("html"));
+        Assert.Null(await client.GetReleaseAsync(new GitHubRepo("a", "html"), package, "3.0.0"));
+        Assert.Equal(html + 1, http.Requests.Count(r => r == Releases("html")));
 
-        // A lobby's version that isn't a version isn't looked up at all (".." would make the tag URL list every release).
+        // A lobby's version that isn't a version isn't looked for at all.
         int asked = http.Requests.Count;
-        Assert.Null(await client.GetReleaseAsync(repo, package, ".."));
-        Assert.Null(await client.GetReleaseAsync(repo, package, "1.0/../.."));
+        Assert.Null(await client.GetReleaseAsync(new GitHubRepo("a", "b"), package, ".."));
+        Assert.Null(await client.GetReleaseAsync(new GitHubRepo("a", "b"), package, "1.0/../.."));
         Assert.Equal(asked, http.Requests.Count);
+    }
+
+    [Fact]
+    public async Task A_download_tells_its_progress_about_ten_times_a_second()
+    {
+        // Ten thousand small pieces as fast as they come: one report per piece used to queue a redraw for each.
+        var source = new MemoryStream(new byte[10_000 * 16]);
+        var reports = new List<long>();
+        long done = await ThunderstoreClient.CopyAsync(new Pieces(source, 16), Stream.Null, TimeSpan.FromSeconds(10), null, reports.Add, default);
+        Assert.Equal(160_000, done);
+        Assert.InRange(reports.Count, 2, 100);
+        Assert.Equal(160_000, reports[^1]);
+    }
+
+    /// <summary>A stream that gives at most <paramref name="size"/> bytes per read, as a network stream often does.</summary>
+    private sealed class Pieces(Stream inner, int size) : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, Math.Min(count, size));
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => inner.ReadAsync(buffer[..Math.Min(buffer.Length, size)], cancellationToken);
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    [Fact]
+    public async Task A_stalled_launcher_update_fails_instead_of_waiting_forever()
+    {
+        HttpResponseMessage Stalled() => new(HttpStatusCode.OK) { Content = new StreamContent(new StallingStream()) };
+        var http = new ScriptedHttp(new FakeHttp()).On("https://github.test/setup.exe", Stalled);
+        using var updater = new Core.Setup.Updater(http) { StallTimeout = TimeSpan.FromSeconds(1) };
+        var clock = Stopwatch.StartNew();
+        string version = "99.1." + Random.Shared.Next(1000, 9999);
+        IOException e = await Assert.ThrowsAsync<IOException>(() => updater.DownloadAsync(new Core.Setup.LauncherRelease(version, "https://github.test/setup.exe", 100, null, "page"), null));
+        Assert.Contains("stalled", e.Message);
+        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(15));
+        // Nothing half-downloaded is left behind.
+        Assert.False(File.Exists(Path.Combine(Core.Setup.Updater.DownloadFolder, $"VoidCrewModLauncher-{version}.exe.part")));
     }
 
     [Fact]

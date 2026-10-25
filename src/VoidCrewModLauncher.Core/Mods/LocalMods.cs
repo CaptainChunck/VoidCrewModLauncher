@@ -53,7 +53,7 @@ public static class LocalMods
             }
             else
             {
-                throw new FileNotFoundException(Loc.F("Nothing to add at {0}", path));
+                throw new FileNotFoundException(Loc.F("Nothing to add at {0}", path)).InEnglish();
             }
 
             // A Thunderstore-style manifest names the mod better than its file name.
@@ -148,7 +148,7 @@ public static class LocalMods
             }
             if (files.Count == 0) continue;
             List<PluginInfo> found = files.Where(f => f.Item1.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)).SelectMany(f => PluginScanner.ScanFile(f.Item1)).ToList();
-            if (found.Any(p => p.Guid == Protocol.BridgeDefaults.PluginGuid)) continue;
+            if (found.Any(p => Protocol.BridgeDefaults.IsBridge(p.Guid))) continue;
             string baseName = Path.GetFileNameWithoutExtension(entryName);
             TsPackage? match = index.FindByName(found.FirstOrDefault()?.Name) ?? index.FindByName(baseName);
             candidates.Add(new ImportCandidate { Name = found.FirstOrDefault()?.Name ?? baseName, Files = files, Plugins = found, Match = match });

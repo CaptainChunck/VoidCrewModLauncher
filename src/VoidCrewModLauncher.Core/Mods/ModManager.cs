@@ -1,3 +1,4 @@
+using VoidCrewModLauncher.Core.Game;
 using VoidCrewModLauncher.Core.Thunderstore;
 
 namespace VoidCrewModLauncher.Core.Mods;
@@ -51,7 +52,7 @@ public sealed class ModManager
 
     private void Refuse(TsPackage package, TsVersion version, Exception e)
     {
-        AppLog.Warn($"{package.FullName} {version.VersionNumber} from GitHub couldn't be used ({e.Message}); the launcher won't offer it again until it restarts.");
+        AppLog.Warn($"{package.FullName} {version.VersionNumber} from GitHub couldn't be used ({Loc.LogMessage(e)}); the launcher won't offer it again until it restarts.");
         lock (_refused) _refused.Add(version.FullName);
         UpdateIndex(index => index.WithoutVersion(package.FullName, version.VersionNumber));
     }
@@ -82,9 +83,9 @@ public sealed class ModManager
     /// <summary>Installs a Thunderstore mod (the latest version unless one is given) with its dependencies, and turns it on.</summary>
     public async Task<InstalledMod> InstallAsync(string id, string? version = null, IProgress<InstallStatus>? status = null, CancellationToken cancel = default)
     {
-        TsPackage package = Index.Find(id) ?? throw new InvalidOperationException(Loc.F("{0} isn't on Thunderstore's Void Crew list.", id));
+        TsPackage package = Index.Find(id) ?? throw new InvalidOperationException(Loc.F("{0} isn't on Thunderstore's Void Crew list.", id)).InEnglish();
         TsVersion chosen = (version != null ? package.Version(version) : null) ?? Newest(package)
-            ?? throw new InvalidOperationException(Loc.F("{0} has no versions.", package.FullName));
+            ?? throw new InvalidOperationException(Loc.F("{0} has no versions.", package.FullName)).InEnglish();
 
         List<(TsPackage Package, TsVersion Version)> plan = Resolve(new[] { (package, chosen) });
         int step = 0;
@@ -155,6 +156,32 @@ public sealed class ModManager
             Visit(package, version);
         }
         return ordered;
+    }
+
+    /// <summary>
+    /// The packages a mod that isn't resolved through Thunderstore's list needs (one added from your PC, or no longer
+    /// listed), from the dependencies its manifest names, each at the version <see cref="Resolve"/> picks for a
+    /// dependency: roots to resolve with the launch's other mods.
+    /// </summary>
+    public List<(TsPackage Package, TsVersion Version)> DependencyRoots(InstalledMod mod, IReadOnlyDictionary<string, string>? pinned = null)
+    {
+        var roots = new List<(TsPackage, TsVersion)>();
+        foreach (string dependency in mod.Dependencies)
+        {
+            PackageReference? reference = PackageReference.Parse(dependency);
+            if (reference == null || PackageIndex.IsBepInExPack(reference.Value.Id)) continue;
+            TsPackage? package = Index.Find(reference.Value.Id);
+            if (package == null)
+            {
+                // Once: the JOIN dialog works the mods out again whenever a tick changes.
+                bool told;
+                lock (_told) told = !_told.Add($"{mod.Id}|{dependency}");
+                if (!told) AppLog.Warn($"{mod.Id} needs {dependency}, which isn't on Thunderstore's Void Crew list; it is left out.");
+                continue;
+            }
+            roots.Add((package, PickVersion(package, reference.Value.Version, pinned)));
+        }
+        return roots;
     }
 
     private TsVersion PickVersion(TsPackage package, string? minimum, IReadOnlyDictionary<string, string>? pinned)
@@ -256,6 +283,71 @@ public sealed class ModManager
         _library.Update(id, m => m.Enabled = true);
     }
 
+    /// <summary>
+    /// <paramref name="mods"/> without the copies BepInEx wouldn't load: when two of a launch's mods carry the same plugin
+    /// (both of VoidManager's packages, say), BepInEx loads the newest version of it, the first folder on a tie, and skips
+    /// the other. A mod none of whose plugins would load is left out of the launch too, so it isn't copied or listed in
+    /// your lobby; your INSTALLED tab stays as you set it. Mods the library doesn't know the plugins of are all kept.
+    /// </summary>
+    public List<RuntimeMod> WithoutDuplicatePlugins(List<RuntimeMod> mods)
+    {
+        var holders = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+        for (int i = 0; i < mods.Count; i++)
+        {
+            foreach (string guid in _library.Find(mods[i].Id)?.PluginGuids ?? new List<string>())
+            {
+                if (!holders.TryGetValue(guid, out List<int>? list)) holders[guid] = list = new List<int>();
+                if (!list.Contains(i)) list.Add(i);
+            }
+        }
+        // For each mod sharing a plugin: the plugin versions in its files (its own version when they can't be read).
+        var versions = new Dictionary<int, Dictionary<string, string>>();
+        string PluginVersion(int at, string guid)
+        {
+            if (!versions.TryGetValue(at, out Dictionary<string, string>? found))
+            {
+                found = new Dictionary<string, string>(StringComparer.Ordinal);
+                foreach (PluginInfo plugin in PluginScanner.ScanDirectory(mods[at].Folder)) found.TryAdd(plugin.Guid, plugin.Version);
+                versions[at] = found;
+            }
+            return found.TryGetValue(guid, out string? version) && version.Length > 0 ? version : mods[at].Version;
+        }
+
+        var loses = new Dictionary<int, int>();
+        var winners = new Dictionary<int, (int Winner, string Guid)>();
+        foreach ((string guid, List<int> list) in holders.Where(h => h.Value.Count > 1))
+        {
+            int winner = list.OrderByDescending(i => PluginVersion(i, guid), VersionNumber.Comparer)
+                .ThenBy(i => PackageStore.SafeName(mods[i].Id), StringComparer.OrdinalIgnoreCase).First();
+            foreach (int loser in list.Where(i => i != winner))
+            {
+                loses[loser] = loses.GetValueOrDefault(loser) + 1;
+                winners[loser] = (winner, guid);
+            }
+        }
+        var kept = new List<RuntimeMod>();
+        for (int i = 0; i < mods.Count; i++)
+        {
+            int plugins = _library.Find(mods[i].Id)?.PluginGuids.Distinct(StringComparer.Ordinal).Count() ?? 0;
+            if (plugins == 0 || loses.GetValueOrDefault(i) < plugins)
+            {
+                kept.Add(mods[i]);
+                continue;
+            }
+            (int winner, string guid) = winners[i];
+            lock (_told)
+            {
+                if (!_told.Add($"{mods[i].Id}|{mods[winner].Id}")) continue;
+            }
+            AppLog.Info($"{mods[i].Id} {mods[i].Version} and {mods[winner].Id} {mods[winner].Version} carry the same plugin ({guid}): loading only " +
+                        $"{mods[winner].Id}, the copy BepInEx would load.");
+        }
+        return kept;
+    }
+
+    /// <summary>What <see cref="DependencyRoots"/> and <see cref="WithoutDuplicatePlugins"/> have written to the log (once each a session).</summary>
+    private readonly HashSet<string> _told = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>Enabled mods that need <paramref name="id"/> (to warn before turning it off or removing it).</summary>
     public List<InstalledMod> EnabledDependents(string id) =>
         _library.Enabled.Where(m => !string.Equals(m.Id, id, StringComparison.OrdinalIgnoreCase)
@@ -284,10 +376,10 @@ public sealed class ModManager
             catch (Exception e) when (newest != null && !cancel.IsCancellationRequested)
             {
                 // Offline (or the download failed): the BepInEx already downloaded still plays.
-                AppLog.Warn($"BepInEx {latest.VersionNumber} couldn't be downloaded ({e.Message}); using BepInEx {newest}.");
+                AppLog.Warn($"BepInEx {latest.VersionNumber} couldn't be downloaded ({Loc.LogMessage(e)}); using BepInEx {newest}.");
             }
         }
         if (newest != null) return _store.VersionDirectory(PackageIndex.BepInExPackId, newest);
-        throw new InvalidOperationException(Loc.T("BepInEx isn't downloaded yet and Thunderstore can't be reached. Connect to the internet and try again."));
+        throw new InvalidOperationException(Loc.T("BepInEx isn't downloaded yet and Thunderstore can't be reached. Connect to the internet and try again.")).InEnglish();
     }
 }

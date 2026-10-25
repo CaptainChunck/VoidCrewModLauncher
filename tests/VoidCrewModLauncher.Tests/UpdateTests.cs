@@ -225,6 +225,70 @@ public class UpdateTests
         Assert.Equal(LobbyModStatus.Download, service.Planner.Plan(after).Lines[0].Status);
     }
 
+    [Fact]
+    public async Task A_lobby_brings_a_rejected_listing_only_from_its_GitHub_release_and_only_for_known_authors()
+    {
+        using var temp = new TempFolder();
+        const string CustomizerRepo = "https://github.com/CaptainChunck/VoidCrewShipCustomizer";
+        string Rejected(string owner, string name) => CurrentJson(owner, name, "0.9.4", review: "rejected").Replace("\"website_url\":\"\"", $"\"website_url\":\"{CustomizerRepo}\"");
+        string release = JsonSerializer.Serialize(new
+        {
+            tag_name = "v0.9.4",
+            draft = false,
+            prerelease = false,
+            html_url = CustomizerRepo + "/releases/tag/v0.9.4",
+            assets = new[] { new { name = "Ship_Customizer-0.9.4.zip", size = 3, state = "uploaded", browser_download_url = "https://github.test/Ship_Customizer-0.9.4.zip" } },
+        });
+        var http = new FakeHttp()
+            .On(PackageUrl("Captain_Chuncks_Mods", "Ship_Customizer"), Rejected("Captain_Chuncks_Mods", "Ship_Customizer"))
+            .On($"{Site}/api/experimental/package/Captain_Chuncks_Mods/Ship_Customizer/0.9.4/", VersionJson("Captain_Chuncks_Mods", "Ship_Customizer", "0.9.4"))
+            .On(PackageUrl("Someone", "Other_Mod"), Rejected("Someone", "Other_Mod"))
+            .On("https://api.github.com/repos/CaptainChunck/VoidCrewShipCustomizer/releases?per_page=100", $"[{release}]");
+        using var service = new LauncherService(temp.AppPaths(), http);
+
+        var room = new RoomDto { Id = "R1", Name = "Ships", Players = 1, MaxPlayers = 8, Modding = "session", Advert = "vcml1;Captain_Chuncks_Mods-Ship_Customizer@0.9.4!R" };
+        Assert.True(await service.FreshenLobbyAsync(LobbyReader.Read(room, "eu", service.Index)));
+        Lobby lobby = LobbyReader.Read(room, "eu", service.Index);
+        // The GitHub release, though Thunderstore has the same version number: never the rejected listing's files.
+        TsPackage customizer = lobby.Mods[0].Package!;
+        Assert.True(customizer.ListingRejected);
+        TsVersion version = Assert.Single(customizer.Versions);
+        Assert.Equal("https://github.test/Ship_Customizer-0.9.4.zip", version.DownloadUrl);
+        Assert.NotNull(version.GitHub);
+        Assert.DoesNotContain(service.Index.Mods, p => p.FullName == customizer.FullName);
+        JoinPlan plan = service.Planner.Plan(lobby);
+        Assert.Equal(LobbyModStatus.Download, plan.Lines[0].Status);
+        Assert.Contains(plan.Warnings, w => w.Contains("Thunderstore rejected", StringComparison.Ordinal));
+
+        // Another author's rejected listing: not brought in, and GitHub isn't asked.
+        int github = http.Requests.Count(r => r.StartsWith("https://api.github.com", StringComparison.Ordinal));
+        var other = new RoomDto { Id = "R2", Name = "Other", Players = 1, MaxPlayers = 8, Modding = "session", Advert = "vcml1;Someone-Other_Mod@0.9.4!R" };
+        Assert.False(await service.FreshenLobbyAsync(LobbyReader.Read(other, "eu", service.Index)));
+        Assert.Equal(LobbyModStatus.Unavailable, service.Planner.Plan(LobbyReader.Read(other, "eu", service.Index)).Lines[0].Status);
+        Assert.Equal(github, http.Requests.Count(r => r.StartsWith("https://api.github.com", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public async Task A_rejected_listings_release_of_plugin_dlls_isnt_used()
+    {
+        // Its DLLs would go into the files of the rejected listing.
+        using var temp = new TempFolder();
+        string current = CurrentJson("Captain_Chuncks_Mods", "Ship_Customizer", "0.9.3", review: "rejected")
+            .Replace("\"website_url\":\"\"", "\"website_url\":\"https://github.com/CaptainChunck/VoidCrewShipCustomizer\"");
+        string release = JsonSerializer.Serialize(new
+        {
+            tag_name = "v0.9.4", draft = false, prerelease = false,
+            assets = new[] { new { name = "VoidCrewShipCustomizer.dll", size = 3, state = "uploaded", browser_download_url = "https://github.test/VoidCrewShipCustomizer.dll" } },
+        });
+        var http = new FakeHttp()
+            .On(PackageUrl("Captain_Chuncks_Mods", "Ship_Customizer"), current)
+            .On("https://api.github.com/repos/CaptainChunck/VoidCrewShipCustomizer/releases?per_page=100", $"[{release}]");
+        using var service = new LauncherService(temp.AppPaths(), http);
+        var room = new RoomDto { Id = "R1", Name = "Ships", Players = 1, MaxPlayers = 8, Modding = "session", Advert = "vcml1;Captain_Chuncks_Mods-Ship_Customizer@0.9.4!R" };
+        Assert.False(await service.FreshenLobbyAsync(LobbyReader.Read(room, "eu", service.Index)));
+        Assert.Null(service.Index.Find("Captain_Chuncks_Mods-Ship_Customizer"));
+    }
+
     // ---------------------------------------------------------------- the launcher's self-update
 
     private static string ReleaseJson(string tag, bool prerelease = false, string asset = InstallLocations.SetupName, string digest = "sha256:ABC123") => $$"""

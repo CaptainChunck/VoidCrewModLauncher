@@ -77,10 +77,84 @@ public static class Loc
         Languages.FirstOrDefault(l => string.Equals(l.Code, code, StringComparison.OrdinalIgnoreCase))?.Code;
 
     /// <summary>The translation of <paramref name="english"/>, or the English text itself.</summary>
-    public static string T(string english) => Translate(_table, english);
+    public static string T(string english)
+    {
+        string text = Translate(_table, english);
+        Remember(text, english, null);
+        return text;
+    }
 
     /// <summary><see cref="T"/>, then string.Format with the current culture's number formats.</summary>
-    public static string F(string english, params object?[] args) => string.Format(CultureInfo.CurrentCulture, T(english), args);
+    public static string F(string english, params object?[] args)
+    {
+        string text = string.Format(CultureInfo.CurrentCulture, Translate(_table, english), args);
+        Remember(text, english, args);
+        return text;
+    }
+
+    // ---------------------------------------------------------------- exception messages in the English log
+
+    /// <summary>The last text <see cref="T"/> or <see cref="F"/> made on this thread, and its English (see <see cref="InEnglish"/>).</summary>
+    [ThreadStatic] private static string? _lastText;
+
+    [ThreadStatic] private static string? _lastEnglish;
+
+    [ThreadStatic] private static object?[]? _lastArgs;
+
+    /// <summary>The key of an exception's English message in Exception.Data.</summary>
+    private const string EnglishKey = "VoidCrewModLauncher.EnglishMessage";
+
+    internal static void Remember(string text, string english, object?[]? args)
+    {
+        _lastText = text;
+        _lastEnglish = english;
+        _lastArgs = args;
+    }
+
+    /// <summary>
+    /// Marks <paramref name="exception"/>, whose message <see cref="T"/> or <see cref="F"/> has just made on this thread,
+    /// with that message in English, which the launcher's log (English, for whoever helps the player) writes instead: the
+    /// player reads it in their language. Straight after the message is made: <c>throw new IOException(Loc.F(...)).InEnglish();</c>
+    /// </summary>
+    public static TException InEnglish<TException>(this TException exception) where TException : Exception
+    {
+        if (_lastText == null || _lastEnglish == null || exception.Message != _lastText) return exception;
+        try
+        {
+            string english = _lastArgs == null ? _lastEnglish : string.Format(CultureInfo.InvariantCulture, _lastEnglish, _lastArgs);
+            if (english != _lastText) exception.Data[EnglishKey] = english;
+        }
+        catch (FormatException)
+        {
+            // The log gets the message as the player read it rather than losing the exception.
+        }
+        return exception;
+    }
+
+    /// <summary>An exception's message as the log writes it: in English when <see cref="InEnglish"/> marked it.</summary>
+    public static string LogMessage(Exception exception) => exception.Data[EnglishKey] as string ?? exception.Message;
+
+    /// <summary>An exception as the log writes it (its type, messages and stack), with the marked messages in English.</summary>
+    public static string LogText(Exception exception)
+    {
+        string text = exception.ToString();
+        var pending = new Stack<Exception>();
+        pending.Push(exception);
+        while (pending.Count > 0)
+        {
+            Exception e = pending.Pop();
+            if (e.Data[EnglishKey] is string english && e.Message.Length > 0) text = text.Replace(e.Message, english, StringComparison.Ordinal);
+            if (e is AggregateException aggregate)
+            {
+                foreach (Exception inner in aggregate.InnerExceptions) pending.Push(inner);
+            }
+            else if (e.InnerException != null)
+            {
+                pending.Push(e.InnerException);
+            }
+        }
+        return text;
+    }
 
     internal static string Translate(IReadOnlyDictionary<string, string> table, string english) =>
         table.TryGetValue(english, out string? translated) && !string.IsNullOrEmpty(translated) ? translated : english;

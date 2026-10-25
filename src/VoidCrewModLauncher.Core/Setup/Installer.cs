@@ -182,7 +182,7 @@ public static class Installer
         try
         {
             using Process old = Process.GetProcessById(oldProcessId);
-            if (!old.WaitForExit(30_000)) throw new InvalidOperationException(Loc.T("The old launcher didn't close."));
+            if (!old.WaitForExit(30_000)) throw new InvalidOperationException(Loc.T("The old launcher didn't close.")).InEnglish();
         }
         catch (ArgumentException)
         {
@@ -200,17 +200,17 @@ public static class Installer
     /// </summary>
     public static void CheckUpdateTarget(string target)
     {
-        if (string.IsNullOrWhiteSpace(target) || !Path.IsPathFullyQualified(target)) throw new InvalidDataException(Loc.T("The launcher to update isn't a full path."));
+        if (string.IsNullOrWhiteSpace(target) || !Path.IsPathFullyQualified(target)) throw new InvalidDataException(Loc.T("The launcher to update isn't a full path.")).InEnglish();
         string name = Path.GetFileName(target);
         if (!name.StartsWith("VoidCrewModLauncher", StringComparison.OrdinalIgnoreCase) || !name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidDataException(Loc.F("{0} isn't the launcher's exe.", name));
+            throw new InvalidDataException(Loc.F("{0} isn't the launcher's exe.", name)).InEnglish();
         }
-        if (Directory.Exists(target)) throw new InvalidDataException(Loc.F("{0} is a folder.", name));
+        if (Directory.Exists(target)) throw new InvalidDataException(Loc.F("{0} is a folder.", name)).InEnglish();
         if (!File.Exists(target)) return;
         // Files without version info (stand-ins in tests) pass on their name; a real exe must say it is the launcher.
         string? product = FileVersionInfo.GetVersionInfo(target).ProductName;
-        if (!string.IsNullOrEmpty(product) && product != AppInfo.Name) throw new InvalidDataException(Loc.F("{0} is {1}, not the {2}.", name, product, AppInfo.Name));
+        if (!string.IsNullOrEmpty(product) && product != AppInfo.Name) throw new InvalidDataException(Loc.F("{0} is {1}, not the {2}.", name, product, AppInfo.Name)).InEnglish();
     }
 
     /// <summary>
@@ -275,7 +275,7 @@ public static class Installer
     public static void CreateShortcut(string shortcut, string target)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(shortcut)!);
-        Type shellType = Type.GetTypeFromProgID("WScript.Shell") ?? throw new InvalidOperationException(Loc.T("Windows Script Host isn't available to make shortcuts."));
+        Type shellType = Type.GetTypeFromProgID("WScript.Shell") ?? throw new InvalidOperationException(Loc.T("Windows Script Host isn't available to make shortcuts.")).InEnglish();
         dynamic shell = Activator.CreateInstance(shellType)!;
         try
         {

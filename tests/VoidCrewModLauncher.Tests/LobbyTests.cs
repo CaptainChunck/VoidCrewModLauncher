@@ -10,6 +10,7 @@ namespace VoidCrewModLauncher.Tests;
 public class LobbyTests : IDisposable
 {
     private readonly TempFolder _temp = new();
+    private readonly ThunderstoreClient _thunderstore;
     private readonly ModManager _manager;
     private readonly JoinPlanner _planner;
 
@@ -17,12 +18,17 @@ public class LobbyTests : IDisposable
     {
         AppPaths paths = _temp.AppPaths();
         var library = new ModLibrary(paths);
-        var store = new PackageStore(paths, new ThunderstoreClient(paths));
+        _thunderstore = new ThunderstoreClient(paths);
+        var store = new PackageStore(paths, _thunderstore);
         _manager = new ModManager(library, store) { Index = Packages.Index() };
         _planner = new JoinPlanner(_manager);
     }
 
-    public void Dispose() => _temp.Dispose();
+    public void Dispose()
+    {
+        _thunderstore.Dispose();
+        _temp.Dispose();
+    }
 
     /// <summary>Puts a mod in the library and the store, as if it had been installed.</summary>
     private void Have(string id, string version, bool enabled = true)
@@ -389,6 +395,112 @@ public class LobbyTests : IDisposable
         relaxedRoom.Name = "Captain's Room";
         Lobby relaxedLobby = LobbyReader.Read(relaxedRoom, "eu", _manager.Index);
         Assert.DoesNotContain(relaxedLobby.Mods, m => ModPolicy.IsVoidManager(m.Id));
+    }
+
+    [Fact]
+    public void The_bridge_is_left_out_of_VoidManager_lists_under_its_old_and_new_GUID()
+    {
+        byte[] list = VoidManagerModList.Encode("1.2.11", new[]
+        {
+            new VoidManagerMod("Max Players", "VoidCrewModdingTeam.MaxPlayers", "1.1.2", 30, ""),
+            new VoidManagerMod("Void Crew Mod Launcher Bridge", BridgeDefaults.PluginGuid, "0.9.2", 4, ""),
+            new VoidManagerMod("Void Crew Mod Launcher Bridge", BridgeDefaults.OldPluginGuid, "0.9.1", 4, ""),
+        });
+        Lobby lobby = LobbyReader.Read(Room(voidManager: list), "eu", _manager.Index);
+        Assert.DoesNotContain(lobby.Mods, m => m.Name.Contains("Bridge", StringComparison.Ordinal));
+        Assert.Equal(new[] { "Max_Players", "VoidManager" }, lobby.Mods.Select(m => m.Package!.Name).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void A_full_adverts_left_out_All_mods_are_still_needed()
+    {
+        // The host's advert had no room for Max Players (it ends with an empty entry); VoidManager lists it as "All".
+        string full = LobbyAdvert.Encode(new[] { new AdvertMod { Id = "Captain_Chuncks_Mods-Void_Crew_Fleet", Version = "0.3.0", Need = ModNeed.Everyone } }) + ";";
+        Assert.True(LobbyAdvert.IsFull(full));
+        byte[] list = VoidManagerModList.Encode("1.2.11", new[]
+        {
+            new VoidManagerMod("Max Players", "VoidCrewModdingTeam.MaxPlayers", "1.1.2", 30, ""),
+            new VoidManagerMod("Some Plugin", "someone.plugin", "1.0.0", 30, ""),
+            new VoidManagerMod("Improved Scoop", "NihilityShift.ImprovedScoop", "1.1.6", 14, ""),
+        });
+
+        Lobby lobby = LobbyReader.Read(Room(full, list), "eu", _manager.Index);
+        LobbyMod maxPlayers = Assert.Single(lobby.Mods, m => m.Id == "VoidCrewModdingTeam-Max_Players");
+        Assert.Equal(ModNeed.Everyone, maxPlayers.Need);
+        Assert.True(_planner.Plan(lobby).Lines.Single(l => l.Mod == maxPlayers).Include);
+        // Only "All" mods of a known package: not a plugin nobody can download, nor a host-side mod.
+        Assert.DoesNotContain(lobby.Mods, m => m.Name == "Some Plugin" || m.Id == "NihilityShift-Improved_Scoop");
+
+        // An advert with room for every mod: VoidManager's extra entries are plugins of the mods it lists, as before.
+        Lobby complete = LobbyReader.Read(Room(full[..^1], list), "eu", _manager.Index);
+        Assert.DoesNotContain(complete.Mods, m => m.Id == "VoidCrewModdingTeam-Max_Players");
+    }
+
+    [Fact]
+    public void Your_local_mods_that_stay_on_bring_the_dependencies_their_manifest_names()
+    {
+        InstalledMod hud = HaveCopy("local-myhud", "My HUD", "1.0.0", new[] { "me.hud" }, enabled: true, voidManagerType: 8);
+        _manager.Library.Update(hud.Id, m => m.Dependencies = new List<string> { "BepInEx-BepInExPack-5.4.2100", "NihilityShift-VoidManager-1.2.10", "Nobody-Missing-1.0.0" });
+
+        JoinPlan plan = _planner.Plan(LobbyReader.Read(Room(modding: "none"), "eu", _manager.Index));
+        Assert.Contains(plan.Kept, m => m.Id == hud.Id);
+        ResolvedJoin join = _planner.Resolve(plan);
+        Assert.Contains(join.Mods, m => m.Id == hud.Id && m.Local);
+        // VoidManager (its newest version, as for any dependency you don't have), not BepInEx, and not what Thunderstore doesn't list.
+        RuntimeMod voidManager = Assert.Single(join.Mods, m => m.Id == "NihilityShift-VoidManager");
+        Assert.Equal("1.2.11", voidManager.Version);
+        Assert.Contains(join.Downloads, d => d.Package.FullName == "NihilityShift-VoidManager");
+        Assert.DoesNotContain(join.Mods, m => m.Id.StartsWith("BepInEx", StringComparison.Ordinal) || m.Id.StartsWith("Nobody", StringComparison.Ordinal));
+
+        // A host's local mod you have a copy of brings its dependencies too.
+        Have("NihilityShift-VoidManager", "1.2.10", enabled: false);
+        HaveCopy("local-ppc", "Penitence Particle Cannon", "1.38.0", new[] { "jack.voidcrew.ppc" }, voidManagerType: 30);
+        _manager.Library.Update("local-ppc", m => m.Dependencies = new List<string> { "NihilityShift-VoidManager-1.2.10" });
+        ResolvedJoin cannon = _planner.Resolve(_planner.Plan(LobbyReader.Read(Room(CannonAdvert("1.38.0", "jack.voidcrew.ppc")), "eu", _manager.Index)));
+        Assert.Contains(cannon.Mods, m => m.Id == "local-ppc");
+        // The version you have is new enough: no download.
+        Assert.Contains(cannon.Mods, m => m.Id == "NihilityShift-VoidManager" && m.Version == "1.2.10");
+        Assert.DoesNotContain(cannon.Downloads, d => d.Package.FullName == "NihilityShift-VoidManager");
+    }
+
+    [Fact]
+    public void Two_copies_of_one_plugin_load_once_when_joining_too()
+    {
+        // Both of VoidManager's packages turned on: BepInEx would load the newer plugin and skip the other.
+        Have("NihilityShift-VoidManager", "1.2.11");
+        Have("VoidCrewModdingTeam-VoidManager", "1.2.6");
+        foreach (string id in new[] { "NihilityShift-VoidManager", "VoidCrewModdingTeam-VoidManager" })
+        {
+            _manager.Library.Update(id, m => m.PluginGuids = new List<string> { ModPolicy.VoidManagerGuid });
+        }
+        JoinPlan plan = _planner.Plan(LobbyReader.Read(Room(modding: "none"), "eu", _manager.Index));
+        Assert.Equal(2, plan.Kept.Count(m => m.IsVoidManager));
+
+        ResolvedJoin join = _planner.Resolve(plan);
+        Assert.Equal(new[] { "NihilityShift-VoidManager" }, join.Mods.Where(m => ModPolicy.IsVoidManager(m.Id)).Select(m => m.Id));
+        // The game started for this join fits it.
+        var joined = new LaunchFile { Mods = join.Mods.Select(m => new LaunchMod { Id = m.Id, Version = m.Version, Need = LobbyAdvert.NeedLetter(m.Need) }).ToList() };
+        Assert.True(JoinPlanner.RunningGameFits(join, joined));
+    }
+
+    [Fact]
+    public void A_lobby_mod_from_a_rejected_listing_says_where_it_comes_from()
+    {
+        // As FreshenLobbyAsync merges it: not in Thunderstore's list, only its GitHub release.
+        TsPackage rejected = new()
+        {
+            Name = "Rejected_Mod", FullName = "Captain_Chuncks_Mods-Rejected_Mod", Owner = "Captain_Chuncks_Mods", ListingRejected = true,
+            Versions = { new TsVersion { Name = "Rejected_Mod", FullName = "Captain_Chuncks_Mods-Rejected_Mod-0.9.4", VersionNumber = "0.9.4", DownloadUrl = "https://github.test/x.zip" } },
+        };
+        _manager.Index = _manager.Index.Merge(new[] { rejected });
+        Assert.DoesNotContain(_manager.Index.Mods, p => p.FullName == rejected.FullName);
+
+        string advert = LobbyAdvert.Encode(new[] { new AdvertMod { Id = rejected.FullName, Version = "0.9.4", Need = ModNeed.Everyone } });
+        JoinPlan plan = _planner.Plan(LobbyReader.Read(Room(advert), "eu", _manager.Index));
+        Assert.Equal(LobbyModStatus.Download, plan.Lines.Single().Status);
+        string warning = Assert.Single(plan.Warnings);
+        Assert.Contains("Thunderstore rejected", warning);
+        Assert.Contains("0.9.4", warning);
     }
 
     [Fact]

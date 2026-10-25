@@ -236,9 +236,14 @@ public sealed class BridgeServer : IDisposable
                 Rooms = rooms;
                 return () => RoomsChanged?.Invoke(rooms);
             case MessageTypes.JoinResult:
-                return message.Deserialize<JoinResultMessage>(JsonFiles.Protocol) is { } join ? () => JoinResult?.Invoke(join) : null;
+                if (message.Deserialize<JoinResultMessage>(JsonFiles.Protocol) is not { } join) return null;
+                // Its error in the player's language (the bridge says it in English).
+                BridgeErrorText.Translate(join);
+                return () => JoinResult?.Invoke(join);
             case MessageTypes.HostResult:
-                return message.Deserialize<HostResultMessage>(JsonFiles.Protocol) is { } host ? () => HostResult?.Invoke(host) : null;
+                if (message.Deserialize<HostResultMessage>(JsonFiles.Protocol) is not { } host) return null;
+                BridgeErrorText.Translate(host);
+                return () => HostResult?.Invoke(host);
             case MessageTypes.Disconnected:
                 return message.Deserialize<DisconnectedMessage>(JsonFiles.Protocol) is { } left ? () => GameLeftRoom?.Invoke(left) : null;
             case MessageTypes.Advert:

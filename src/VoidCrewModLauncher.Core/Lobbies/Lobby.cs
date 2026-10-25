@@ -59,20 +59,18 @@ public sealed class LobbyMod
 /// <summary>A room from the game's list, with its mods read from the lobby properties.</summary>
 public sealed class Lobby
 {
-    public Lobby(RoomDto room, string? region, List<LobbyMod> mods, LobbyModSource source, string? voidManagerVersion)
+    public Lobby(RoomDto room, string? region, List<LobbyMod> mods, LobbyModSource source)
     {
         Room = room;
         Region = region;
         Mods = mods;
         ModSource = source;
-        VoidManagerVersion = voidManagerVersion;
     }
 
     public RoomDto Room { get; }
     public string? Region { get; }
     public List<LobbyMod> Mods { get; }
     public LobbyModSource ModSource { get; }
-    public string? VoidManagerVersion { get; }
 
     public string Id => Room.Id;
 
@@ -150,9 +148,12 @@ public static class LobbyReader
             }
             for (int i = 0; i < mods.Count; i++) Remember(mods[i], i);
 
+            // A full advert leaves mods out (see LobbyAdvert.IsFull): VoidManager's "All" entries it has no room for are
+            // still needed by everyone.
+            bool advertFull = advert != null && LobbyAdvert.IsFull(room.Advert);
             foreach (VoidManagerMod mod in voidManager.Value.Mods)
             {
-                if (mod.MultiplayerType == 0 || mod.Guid == BridgeDefaults.PluginGuid) continue;
+                if (mod.MultiplayerType == 0 || BridgeDefaults.IsBridge(mod.Guid)) continue;
                 ModNeed need = LobbyAdvert.FromVoidManagerType(mod.MultiplayerType);
                 TsPackage? package = null;
                 LobbyMod? same = byGuid.GetValueOrDefault(mod.Guid);
@@ -181,8 +182,9 @@ public static class LobbyReader
                     continue;
                 }
                 // The launcher's advert already lists every mod of the launch; VoidManager's extra entries are plugins
-                // inside those packages.
-                if (advert != null) continue;
+                // inside those packages. Unless the advert is full: an "All" mod of a known package was left out of it,
+                // and VoidManager turns away joining players without it.
+                if (advert != null && !(advertFull && need == ModNeed.Everyone && package != null)) continue;
                 var added = new LobbyMod
                 {
                     Name = mod.Name,
@@ -235,6 +237,6 @@ public static class LobbyReader
             mod.Need = ModPolicy.GuessNeed(mod.Package.FullName, mod.Package.Categories);
         }
         mods.RemoveAll(m => m.Package != null && PackageIndex.IsBepInExPack(m.Package.FullName));
-        return new Lobby(room, region, mods, source, voidManager?.Version);
+        return new Lobby(room, region, mods, source);
     }
 }

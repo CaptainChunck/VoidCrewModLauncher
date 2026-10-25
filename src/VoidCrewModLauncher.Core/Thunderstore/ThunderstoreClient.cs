@@ -87,11 +87,12 @@ public sealed class ThunderstoreClient : IDisposable
 
         try
         {
-            List<TsPackage> packages = await DownloadListAsync(cancel);
+            // Off the caller's thread from here (the UI's at start-up): the list is a few megabytes of JSON.
+            List<TsPackage> packages = await DownloadListAsync(cancel).ConfigureAwait(false);
             string temp = cache + ".download";
             await using (FileStream file = File.Create(temp))
             {
-                await JsonSerializer.SerializeAsync(file, packages, Json, cancel);
+                await JsonSerializer.SerializeAsync(file, packages, Json, cancel).ConfigureAwait(false);
             }
             File.Move(temp, cache, true);
             IsOffline = false;
@@ -103,7 +104,7 @@ public sealed class ThunderstoreClient : IDisposable
         {
             List<TsPackage>? cached = File.Exists(cache) ? ReadCache(cache) : null;
             if (cached == null) throw;
-            AppLog.Warn($"Thunderstore couldn't be reached ({e.Message}); using the package list from {File.GetLastWriteTime(cache):g}.");
+            AppLog.Warn($"Thunderstore couldn't be reached ({Loc.LogMessage(e)}); using the package list from {File.GetLastWriteTime(cache):g}.");
             IsOffline = true;
             ListTime = File.GetLastWriteTime(cache);
             return cached;
@@ -115,11 +116,11 @@ public sealed class ThunderstoreClient : IDisposable
     {
         try
         {
-            List<string> chunks = JsonSerializer.Deserialize<List<string>>(await GetBodyAsync(ListingIndexUrl, cancel)) ?? new List<string>();
+            List<string> chunks = JsonSerializer.Deserialize<List<string>>(await GetBodyAsync(ListingIndexUrl, cancel).ConfigureAwait(false)) ?? new List<string>();
             var packages = new List<TsPackage>();
             foreach (string chunk in chunks)
             {
-                packages.AddRange(JsonSerializer.Deserialize<List<TsPackage>>(await GetBodyAsync(chunk, cancel), Json) ?? new List<TsPackage>());
+                packages.AddRange(JsonSerializer.Deserialize<List<TsPackage>>(await GetBodyAsync(chunk, cancel).ConfigureAwait(false), Json) ?? new List<TsPackage>());
             }
             if (packages.Count > 0) return packages;
             AppLog.Warn("Thunderstore's listing index was empty; reading its package list instead.");
@@ -128,19 +129,19 @@ public sealed class ThunderstoreClient : IDisposable
         {
             AppLog.Warn($"Thunderstore's listing index couldn't be read ({e.Message}); reading its package list instead.");
         }
-        return JsonSerializer.Deserialize<List<TsPackage>>(await GetBodyAsync(PackageListUrl, cancel), Json)
-               ?? throw new InvalidDataException(Loc.T("Thunderstore sent a package list the launcher couldn't read."));
+        return JsonSerializer.Deserialize<List<TsPackage>>(await GetBodyAsync(PackageListUrl, cancel).ConfigureAwait(false), Json)
+               ?? throw new InvalidDataException(Loc.T("Thunderstore sent a package list the launcher couldn't read.")).InEnglish();
     }
 
     /// <summary>A response body, unpacked when it is gzip data (the listing index stores its files compressed).</summary>
     private async Task<byte[]> GetBodyAsync(string url, CancellationToken cancel)
     {
-        byte[] body = await _http.GetByteArrayAsync(url, cancel);
+        byte[] body = await _http.GetByteArrayAsync(url, cancel).ConfigureAwait(false);
         if (body.Length >= 2 && body[0] == 0x1F && body[1] == 0x8B)
         {
             using var gzip = new GZipStream(new MemoryStream(body), CompressionMode.Decompress);
             using var unpacked = new MemoryStream();
-            await gzip.CopyToAsync(unpacked, cancel);
+            await gzip.CopyToAsync(unpacked, cancel).ConfigureAwait(false);
             body = unpacked.ToArray();
         }
         // System.Text.Json reads UTF-8 without the byte order mark.
@@ -159,8 +160,8 @@ public sealed class ThunderstoreClient : IDisposable
     }
 
     /// <summary>
-    /// A package even when its Void Crew listing was rejected: only to find the mod's GitHub repo (its own releases),
-    /// never to download its Thunderstore files.
+    /// A package even when its Void Crew listing was rejected (then marked <see cref="TsPackage.ListingRejected"/>): only to
+    /// find the mod's GitHub repo (its own releases), never to download its Thunderstore files.
     /// </summary>
     public Task<TsPackage?> GetForGitHubAsync(string id, CancellationToken cancel = default) => GetCurrentAsync(id, cancel, true);
 
@@ -257,15 +258,17 @@ public sealed class ThunderstoreClient : IDisposable
         public TsVersion? Latest { get; set; }
         public List<CommunityListing> CommunityListings { get; set; } = new();
 
-        /// <summary>As a list entry, when it is listed (and not rejected) in the Void Crew community.</summary>
+        /// <summary>As a list entry, when it is listed (and not rejected, unless <paramref name="includeRejected"/>) in the Void Crew community.</summary>
         public TsPackage? ToPackage(bool includeRejected = false)
         {
             CommunityListing? listing = CommunityListings.FirstOrDefault(l => string.Equals(l.Community, AppInfo.ThunderstoreCommunity, StringComparison.OrdinalIgnoreCase));
             if (Latest == null || listing == null) return null;
-            if (!includeRejected && string.Equals(listing.ReviewStatus, "rejected", StringComparison.OrdinalIgnoreCase)) return null;
+            bool rejected = string.Equals(listing.ReviewStatus, "rejected", StringComparison.OrdinalIgnoreCase);
+            if (rejected && !includeRejected) return null;
             string owner = Owner.Length > 0 ? Owner : Namespace;
             return new TsPackage
             {
+                ListingRejected = rejected,
                 Name = Name,
                 FullName = FullName,
                 Owner = owner,
@@ -313,16 +316,16 @@ public sealed class ThunderstoreClient : IDisposable
         string temp = target + ".part";
         try
         {
-            using (HttpResponseMessage response = await _http.GetAsync(version.DownloadUrl, HttpCompletionOption.ResponseHeadersRead, cancel))
+            using (HttpResponseMessage response = await _http.GetAsync(version.DownloadUrl, HttpCompletionOption.ResponseHeadersRead, cancel).ConfigureAwait(false))
             {
                 response.EnsureSuccessStatusCode();
                 long? length = response.Content.Headers.ContentLength ?? (version.FileSize > 0 ? version.FileSize : null);
-                await using Stream source = await response.Content.ReadAsStreamAsync(cancel);
+                await using Stream source = await response.Content.ReadAsStreamAsync(cancel).ConfigureAwait(false);
                 await using FileStream file = File.Create(temp);
-                await CopyAsync(source, file, StallTimeout, (_, _, done) =>
+                await CopyAsync(source, file, StallTimeout, null, done =>
                 {
                     if (length > 0) progress?.Report(Math.Min(1.0, done / (double)length));
-                }, cancel);
+                }, cancel).ConfigureAwait(false);
             }
             File.Move(temp, target, true);
         }
@@ -335,16 +338,22 @@ public sealed class ThunderstoreClient : IDisposable
         return target;
     }
 
+    /// <summary>How often a download says how far it is: a read can be a few kilobytes, and each report redraws the status bar.</summary>
+    internal static readonly TimeSpan ProgressInterval = TimeSpan.FromMilliseconds(100);
+
     /// <summary>
     /// Copies a download to <paramref name="target"/>, telling <paramref name="received"/> about each piece (the bytes,
-    /// their count, the total so far). Throws an IOException when nothing arrives for <paramref name="stall"/>: a
-    /// stalled server would otherwise keep the download (and the store's lock) waiting forever.
+    /// their count, the total so far) and <paramref name="progress"/> the total so far about ten times a second and at
+    /// the end. Throws an IOException when nothing arrives for <paramref name="stall"/>: a stalled server would otherwise
+    /// keep the download (and the store's lock) waiting forever. The copying runs off the caller's thread (the UI's,
+    /// when a player installs).
     /// </summary>
-    internal static async Task<long> CopyAsync(Stream source, Stream target, TimeSpan stall, Action<byte[], int, long>? received, CancellationToken cancel)
+    internal static async Task<long> CopyAsync(Stream source, Stream target, TimeSpan stall, Action<byte[], int, long>? received, Action<long>? progress, CancellationToken cancel)
     {
         using var watchdog = CancellationTokenSource.CreateLinkedTokenSource(cancel);
         var buffer = new byte[81920];
         long done = 0;
+        long nextReport = 0;
         while (true)
         {
             watchdog.CancelAfter(stall);
@@ -352,16 +361,26 @@ public sealed class ThunderstoreClient : IDisposable
             try
             {
                 // WaitAsync too, for a stream that doesn't listen to its token.
-                read = await source.ReadAsync(buffer, watchdog.Token).AsTask().WaitAsync(watchdog.Token);
+                read = await source.ReadAsync(buffer, watchdog.Token).AsTask().WaitAsync(watchdog.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
             {
-                throw new IOException(Loc.F("The download stalled: nothing arrived for {0:0} seconds.", stall.TotalSeconds));
+                throw new IOException(Loc.F("The download stalled: nothing arrived for {0:0} seconds.", stall.TotalSeconds)).InEnglish();
             }
-            if (read == 0) return done;
-            await target.WriteAsync(buffer.AsMemory(0, read), cancel);
+            if (read == 0)
+            {
+                progress?.Invoke(done);
+                return done;
+            }
+            await target.WriteAsync(buffer.AsMemory(0, read), cancel).ConfigureAwait(false);
             done += read;
             received?.Invoke(buffer, read, done);
+            long now = Environment.TickCount64;
+            if (progress != null && now >= nextReport)
+            {
+                nextReport = now + (long)ProgressInterval.TotalMilliseconds;
+                progress(done);
+            }
         }
     }
 

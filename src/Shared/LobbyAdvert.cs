@@ -70,6 +70,8 @@ namespace VoidCrewModLauncher.Protocol
     /// Format: <c>vcml1;Namespace-Name@1.2.3!R;#LocalMod@1.0!R:plugin.guid,other.guid</c>. Thunderstore names never
     /// contain ; @ ! or #. A local mod's plugin GUIDs follow its need letter after a colon (launcher 0.8.2 and later):
     /// older launchers read only the letter, so they still read the rest of the advert as before.
+    /// An advert without room for every mod ends with an empty entry (a last ";"), which every reader skips: it tells
+    /// launchers after 0.9.1 that the host has more mods than the advert lists (see <see cref="IsFull"/>).
     /// </summary>
     public static class LobbyAdvert
     {
@@ -107,18 +109,91 @@ namespace VoidCrewModLauncher.Protocol
 
         public static string Encode(IEnumerable<AdvertMod> mods)
         {
-            var text = new StringBuilder(Header);
-            int count = 0;
+            List<AdvertMod> leftOut;
+            return Encode(mods, out leftOut);
+        }
+
+        /// <summary>
+        /// The advert for <paramref name="mods"/>, in their order when they all fit. When they don't (more than
+        /// <see cref="MaxMods"/> mods, or longer than <see cref="MaxLength"/>), the mods everyone needs come first, since
+        /// joining players are turned away without them, then mods whose need isn't known, then the rest; local mods keep
+        /// their plugin GUIDs only while there is room (without them, other launchers look for the host's local mods by
+        /// name or in VoidManager's list), and when mods are left out, the advert ends with an empty entry to say so.
+        /// </summary>
+        /// <param name="leftOut">The mods that didn't fit (empty when they all did).</param>
+        public static string Encode(IEnumerable<AdvertMod> mods, out List<AdvertMod> leftOut)
+        {
+            leftOut = new List<AdvertMod>();
+            var list = new List<AdvertMod>();
             foreach (AdvertMod mod in mods)
             {
-                if (mod == null || string.IsNullOrEmpty(mod.Id)) continue;
-                if (++count > MaxMods) break;
-                string entry = ";" + (mod.Local ? "#" : "") + Clean(mod.Id) + "@" + Clean(string.IsNullOrEmpty(mod.Version) ? "0" : mod.Version) +
-                               "!" + (char)(mod.Need == 0 ? ModNeed.Unknown : mod.Need) + GuidList(mod.PluginGuids);
-                if (text.Length + entry.Length > MaxLength) break;
-                text.Append(entry);
+                if (mod != null && !string.IsNullOrEmpty(mod.Id)) list.Add(mod);
             }
+
+            var text = new StringBuilder(Header);
+            foreach (AdvertMod mod in list) text.Append(Entry(mod, true));
+            if (list.Count <= MaxMods && text.Length <= MaxLength) return text.ToString();
+
+            // Too much: the most needed first (a stable sort keeps the order within each kind), without plugin GUIDs, and
+            // room kept for the empty entry at the end.
+            var ordered = new List<AdvertMod>();
+            for (int rank = 0; rank < 3; rank++)
+            {
+                foreach (AdvertMod mod in list)
+                {
+                    if (Rank(mod.Need) == rank) ordered.Add(mod);
+                }
+            }
+            var kept = new List<AdvertMod>();
+            var entries = new List<string>();
+            int length = Header.Length + 1;
+            foreach (AdvertMod mod in ordered)
+            {
+                string entry = Entry(mod, false);
+                if (kept.Count >= MaxMods || length + entry.Length > MaxLength)
+                {
+                    leftOut.Add(mod);
+                    continue;
+                }
+                kept.Add(mod);
+                entries.Add(entry);
+                length += entry.Length;
+            }
+            // The room left gives local mods their plugin GUIDs back, in the same order.
+            for (int i = 0; i < kept.Count; i++)
+            {
+                string full = Entry(kept[i], true);
+                if (full.Length == entries[i].Length || length - entries[i].Length + full.Length > MaxLength) continue;
+                length += full.Length - entries[i].Length;
+                entries[i] = full;
+            }
+            text = new StringBuilder(Header);
+            foreach (string entry in entries) text.Append(entry);
+            // The empty entry: some mods have no room.
+            if (leftOut.Count > 0) text.Append(';');
             return text.ToString();
+        }
+
+        /// <summary>
+        /// The host has more mods than its advert lists: the advert ends with an empty entry (launchers up to 0.9.1 left
+        /// mods out without saying so).
+        /// </summary>
+        public static bool IsFull(string text)
+        {
+            return !string.IsNullOrEmpty(text) && text.Length <= MaxTextLength && text.EndsWith(";", StringComparison.Ordinal) && text.StartsWith(Header + ";", StringComparison.Ordinal);
+        }
+
+        private static string Entry(AdvertMod mod, bool withGuids)
+        {
+            return ";" + (mod.Local ? "#" : "") + Clean(mod.Id) + "@" + Clean(string.IsNullOrEmpty(mod.Version) ? "0" : mod.Version) +
+                   "!" + (char)(mod.Need == 0 ? ModNeed.Unknown : mod.Need) + (withGuids ? GuidList(mod.PluginGuids) : "");
+        }
+
+        /// <summary>What joining players can least do without comes first in a full advert: 0 everyone, 1 not known, 2 the rest.</summary>
+        private static int Rank(ModNeed need)
+        {
+            if (need == ModNeed.Everyone) return 0;
+            return need == ModNeed.Unknown || need == 0 ? 1 : 2;
         }
 
         private static string GuidList(List<string> guids)

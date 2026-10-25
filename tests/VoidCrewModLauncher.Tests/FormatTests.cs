@@ -98,6 +98,76 @@ public class FormatTests
         Assert.Equal("M0", mods[0].Id);
     }
 
+    /// <summary>A local mod with as many long plugin GUIDs as an advert carries (several hundred characters of them).</summary>
+    private static AdvertMod LocalWithGuids(int i) => new()
+    {
+        Id = $"Local Mod {i}", Version = "1.0.0", Need = ModNeed.ClientOnly, Local = true,
+        PluginGuids = Enumerable.Range(0, LobbyAdvert.MaxGuids).Select(g => $"someone.local{i}.{g}.{new string('x', 60)}").ToList(),
+    };
+
+    [Fact]
+    public void Plugin_guids_without_room_go_before_any_mod_does()
+    {
+        // Local mods first (as PLAY lists them), then a mod everyone needs: all of them fit once the GUIDs are left out.
+        var mods = Enumerable.Range(0, 6).Select(LocalWithGuids).ToList();
+        mods.Add(new AdvertMod { Id = "VoidCrewModdingTeam-Max_Players", Version = "1.1.2", Need = ModNeed.Everyone });
+
+        string text = LobbyAdvert.Encode(mods, out List<AdvertMod> leftOut);
+        Assert.True(text.Length <= LobbyAdvert.MaxLength);
+        Assert.Empty(leftOut);
+        Assert.False(LobbyAdvert.IsFull(text));
+        List<AdvertMod> read = LobbyAdvert.Decode(text)!;
+        Assert.Equal(mods.Count, read.Count);
+        Assert.Equal("VoidCrewModdingTeam-Max_Players", read[0].Id);
+        // GUIDs where there was room, and not for every local mod.
+        Assert.Contains(read, m => m.Local && m.PluginGuids == null);
+        Assert.Contains(read, m => m.Local && m.PluginGuids?.Count == LobbyAdvert.MaxGuids);
+
+        // Everything fits: the order and the GUIDs are as given.
+        string small = LobbyAdvert.Encode(mods.Take(2), out List<AdvertMod> none);
+        Assert.Empty(none);
+        Assert.Equal(mods.Take(2).Select(m => m.Id), LobbyAdvert.Decode(small)!.Select(m => m.Id));
+        Assert.All(LobbyAdvert.Decode(small)!, m => Assert.Equal(LobbyAdvert.MaxGuids, m.PluginGuids!.Count));
+    }
+
+    [Fact]
+    public void A_full_advert_keeps_the_mods_everyone_needs_and_says_it_is_full()
+    {
+        // Sixty mods with long ids: too long for one advert. The one everyone needs is last.
+        var mods = Enumerable.Range(0, 60).Select(i => new AdvertMod { Id = $"Someone_With_A_Long_Name-Client_Side_Mod_{i}", Version = "1.0.0", Need = ModNeed.ClientOnly }).ToList();
+        mods.Add(new AdvertMod { Id = "VoidCrewModdingTeam-Max_Players", Version = "1.1.2", Need = ModNeed.Everyone });
+
+        string text = LobbyAdvert.Encode(mods, out List<AdvertMod> leftOut);
+        Assert.True(text.Length <= LobbyAdvert.MaxLength);
+        Assert.NotEmpty(leftOut);
+        Assert.True(LobbyAdvert.IsFull(text));
+        List<AdvertMod> read = LobbyAdvert.Decode(text)!;
+        Assert.Equal("VoidCrewModdingTeam-Max_Players", read[0].Id);
+        Assert.Equal(mods.Count, read.Count + leftOut.Count);
+        Assert.DoesNotContain(read, m => leftOut.Any(l => l.Id == m.Id));
+
+        // Launchers up to 0.9.1 read each entry the same way and skip the empty one at the end.
+        string[] parts = text.Split(';');
+        Assert.Equal("", parts[^1]);
+        Assert.Equal(read.Count, parts.Skip(1).Count(p => p.Length > 0));
+    }
+
+    [Fact]
+    public void More_mods_than_an_advert_takes_leave_out_the_least_needed()
+    {
+        var mods = Enumerable.Range(0, LobbyAdvert.MaxMods + 5).Select(i => new AdvertMod { Id = $"A-M{i}", Version = "1", Need = ModNeed.HostOnly }).ToList();
+        mods.Add(new AdvertMod { Id = "A-Needed", Version = "1", Need = ModNeed.Everyone });
+        mods.Add(new AdvertMod { Id = "A-Unknown", Version = "1", Need = ModNeed.Unknown });
+
+        string text = LobbyAdvert.Encode(mods, out List<AdvertMod> leftOut);
+        List<AdvertMod> read = LobbyAdvert.Decode(text)!;
+        Assert.Equal(LobbyAdvert.MaxMods, read.Count);
+        Assert.Equal(new[] { "A-Needed", "A-Unknown", "A-M0" }, read.Take(3).Select(m => m.Id));
+        Assert.Equal(7, leftOut.Count);
+        Assert.All(leftOut, m => Assert.Equal(ModNeed.HostOnly, m.Need));
+        Assert.True(LobbyAdvert.IsFull(text));
+    }
+
     [Fact]
     public void Advert_entries_with_overlong_ids_or_versions_are_left_out()
     {

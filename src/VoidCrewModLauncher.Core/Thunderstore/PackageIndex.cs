@@ -86,8 +86,11 @@ public sealed class PackageIndex
 
     public IReadOnlyList<TsPackage> All { get; }
 
-    /// <summary>What the Mods tab lists: Thunderstore's mods, not BepInEx itself, not mod managers, not NSFW.</summary>
-    public IEnumerable<TsPackage> Mods => All.Where(p => !p.IsGitHubOnly && !NotMods.Contains(p.FullName) && !p.HasNsfwContent && !IsBepInExPack(p.FullName));
+    /// <summary>
+    /// What the Mods tab lists: Thunderstore's mods, not BepInEx itself, not mod managers, not NSFW, and not a package
+    /// whose Void Crew listing Thunderstore rejected (a lobby brought it in).
+    /// </summary>
+    public IEnumerable<TsPackage> Mods => All.Where(p => !p.IsGitHubOnly && !p.ListingRejected && !NotMods.Contains(p.FullName) && !p.HasNsfwContent && !IsBepInExPack(p.FullName));
 
     /// <summary>The mods with their simplified names, worked out once per index (lobby lists look names up a lot).</summary>
     private List<(TsPackage Package, string Name)>? _simpleNames;

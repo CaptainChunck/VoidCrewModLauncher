@@ -177,13 +177,18 @@ public class GitHubTests
         Assert.Equal("fleet 0.4.0", File.ReadAllText(Path.Combine(service.Store.VersionDirectory("Captain_Chuncks_Mods-Void_Crew_Fleet", "0.4.0"), "VoidCrewFleet.dll")));
     }
 
+    /// <summary>The repo's list of releases, as GitHub answers /releases (newest first).</summary>
+    private const string ReleasesUrl = "https://api.github.com/repos/CaptainChunck/VoidCrewVRUIFix/releases?per_page=100";
+
+    private static string Releases(params string[] releases) => "[" + string.Join(",", releases) + "]";
+
     [Fact]
     public async Task Joiners_get_a_hosts_GitHub_version_from_the_same_release()
     {
         using var temp = new TempFolder();
         byte[] zip = VrUiFixZip();
         var http = ThunderstoreList(new FakeHttp(), VrUiFix())
-            .On("https://api.github.com/repos/CaptainChunck/VoidCrewVRUIFix/releases/tags/v3.15.0", Release("v3.15.0", ("Void_Crew_VR_UI_Fix-3.15.0.zip", zip)));
+            .On(ReleasesUrl, Releases(Release("v3.15.1", ("Void_Crew_VR_UI_Fix-3.15.1.zip", zip)), Release("v3.15.0", ("Void_Crew_VR_UI_Fix-3.15.0.zip", zip))));
         using var service = new LauncherService(temp.AppPaths(), http);
         await service.RefreshPackagesAsync(true);
 
@@ -193,7 +198,40 @@ public class GitHubTests
         Assert.True(await service.FreshenLobbyAsync(before));
         Lobby after = LobbyReader.Read(room, "eu", service.Index);
         Assert.NotNull(after.Mods[0].PackageVersion!.GitHub);
+        Assert.Equal("3.15.0", after.Mods[0].PackageVersion!.VersionNumber);
         Assert.Equal(LobbyModStatus.Download, service.Planner.Plan(after).Lines[0].Status);
+    }
+
+    [Fact]
+    public async Task Lobby_versions_cost_one_GitHub_request_per_repo_and_a_missing_one_none()
+    {
+        // The server browser looks lobbies' versions up without a click; GitHub allows 60 requests an hour without an account.
+        using var temp = new TempFolder();
+        AppPaths paths = temp.AppPaths();
+        var repo = new GitHubRepo("CaptainChunck", "VoidCrewVRUIFix");
+        TsPackage package = VrUiFix();
+        var http = new FakeHttp().On(ReleasesUrl, Releases(Release("v3.15.1", ("Void_Crew_VR_UI_Fix-3.15.1.zip", new byte[3])), Release("3.15.0", ("Void_Crew_VR_UI_Fix-3.15.0.zip", new byte[4]))))
+            .WithETag(ReleasesUrl, "W/\"releases\"");
+        using (var client = new GitHubClient(paths, http))
+        {
+            Assert.Equal("3.15.1", (await client.GetReleaseAsync(repo, package, "3.15.1"))!.VersionNumber);
+            // A tag without the "v" too.
+            Assert.Equal(4, (await client.GetReleaseAsync(repo, package, "3.15.0"))!.FileSize);
+            Assert.Null(await client.GetReleaseAsync(repo, package, "9.9.9"));
+            Assert.Single(http.Requests);
+        }
+
+        // Later: asked again with its ETag; "not modified", which GitHub doesn't count, keeps the list.
+        string cache = Path.Combine(paths.Cache, "github.json");
+        var saved = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(cache))!.AsObject();
+        foreach (var entry in saved) entry.Value!["FetchedUtc"] = DateTime.UtcNow.AddHours(-1);
+        File.WriteAllText(cache, saved.ToJsonString());
+        using (var client = new GitHubClient(paths, http))
+        {
+            Assert.NotNull(await client.GetReleaseAsync(repo, package, "3.15.0"));
+            Assert.Equal(2, http.Requests.Count);
+            Assert.Equal("W/\"releases\"", http.IfNoneMatch[ReleasesUrl]);
+        }
     }
 
     [Fact]

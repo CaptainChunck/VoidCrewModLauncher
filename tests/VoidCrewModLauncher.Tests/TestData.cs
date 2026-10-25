@@ -1,7 +1,41 @@
+using Microsoft.Win32;
 using VoidCrewModLauncher.Core;
 using VoidCrewModLauncher.Core.Thunderstore;
 
 namespace VoidCrewModLauncher.Tests;
+
+/// <summary>
+/// A registry key of its own for one test, under HKCU\Software\VoidCrewModLauncherTests, deleted afterwards together with
+/// that parent key once no other test's key is in it. Tests that use one are in the <see cref="TestRegistryCollection"/>,
+/// so they never run at the same time: one test's clean-up can't take the parent key from under another's.
+/// </summary>
+public sealed class TestRegistryKey : IDisposable
+{
+    public const string Parent = @"Software\VoidCrewModLauncherTests";
+
+    /// <summary>The key's path under HKEY_CURRENT_USER.</summary>
+    public string Path { get; } = Parent + @"\" + Guid.NewGuid().ToString("N");
+
+    public void Dispose()
+    {
+        Registry.CurrentUser.DeleteSubKeyTree(Path, false);
+        try
+        {
+            Registry.CurrentUser.DeleteSubKey(Parent, false);
+        }
+        catch (Exception e) when (e is InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            // Another key is still in it (another test run's, say): the parent stays.
+        }
+    }
+}
+
+/// <summary>The test classes that write to the registry, one after another.</summary>
+[CollectionDefinition(Name)]
+public sealed class TestRegistryCollection
+{
+    public const string Name = "HKCU test keys";
+}
 
 /// <summary>A temporary launcher data folder, deleted afterwards.</summary>
 public sealed class TempFolder : IDisposable

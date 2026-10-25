@@ -20,12 +20,15 @@ public sealed class LinkPipe : IDisposable
 
     public static string DefaultName => "VoidCrewModLauncher-links-" + Environment.UserName;
 
-    /// <summary>Gives <paramref name="link"/> to the open launcher; false when none answers.</summary>
+    /// <summary>
+    /// Gives <paramref name="link"/> to the open launcher; false when none answers. Only to a pipe this user's launcher
+    /// made: one another account put up under the same name gets nothing.
+    /// </summary>
     public static async Task<bool> SendAsync(string link, string? name = null, int timeoutMs = 3000)
     {
         try
         {
-            var client = new NamedPipeClientStream(".", name ?? DefaultName, PipeDirection.Out, PipeOptions.Asynchronous);
+            var client = new NamedPipeClientStream(".", name ?? DefaultName, PipeDirection.Out, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
             await using ConfiguredAsyncDisposable disposeClient = client.ConfigureAwait(false);
             await client.ConnectAsync(timeoutMs).ConfigureAwait(false);
             byte[] bytes = Encoding.UTF8.GetBytes(link.Replace("\r", "").Replace("\n", "") + "\n");

@@ -109,7 +109,11 @@ public class LocalizationTests
         foreach (LauncherLanguage language in Loc.Languages.Skip(1))
         {
             string file = Path.Combine(LocKeys.Root, "src", "VoidCrewModLauncher.Core", "Localization", language.Code + ".json");
-            if (!File.Exists(file)) continue;
+            if (!File.Exists(file))
+            {
+                problems.Add($"{language.Code}: no translation file ({file})");
+                continue;
+            }
             Dictionary<string, string> table;
             using (FileStream stream = File.OpenRead(file)) table = Loc.Parse(stream);
             Assert.Equal(table.Count, Loc.Load(language.Code).Count);
@@ -124,9 +128,46 @@ public class LocalizationTests
                 {
                     problems.Add($"{language.Code}: placeholders differ in \"{key}\" -> \"{translation}\"");
                 }
+                // A stray { or } passes the comparison above, then breaks string.Format (Loc.F, a StringFormat) for that language.
+                else if (LocKeys.Formats(key) && !LocKeys.Formats(translation))
+                {
+                    problems.Add($"{language.Code}: \"{translation}\" isn't a format text like \"{key}\" (a stray {{ or }}?)");
+                }
             }
         }
         Assert.True(problems.Count == 0, string.Join(Environment.NewLine, problems.Take(40)));
+    }
+
+    [Fact]
+    public void The_format_check_finds_a_stray_brace()
+    {
+        Assert.True(LocKeys.Formats("Downloading {0} {1:0.0} ({2}/{3})"));
+        Assert.True(LocKeys.Formats("{{literal}} {0,5}"));
+        Assert.False(LocKeys.Formats("Téléchargement {0} {"));
+        Assert.False(LocKeys.Formats("{0} }"));
+        // The placeholders alone don't tell.
+        Assert.Equal(LocKeys.Placeholders("{0} done"), LocKeys.Placeholders("{0} fait {"));
+    }
+
+    [Fact]
+    public void An_exception_message_the_player_reads_translated_is_logged_in_English()
+    {
+        // As Loc.F leaves it for a French player (without switching the whole launcher's language in a test).
+        Loc.Remember("Le téléchargement est bloqué : rien reçu depuis 30 secondes.", "The download stalled: nothing arrived for {0:0} seconds.", new object?[] { 30.0 });
+        IOException stalled = new IOException("Le téléchargement est bloqué : rien reçu depuis 30 secondes.").InEnglish();
+        Assert.Equal("Le téléchargement est bloqué : rien reçu depuis 30 secondes.", stalled.Message);
+        Assert.Equal("The download stalled: nothing arrived for 30 seconds.", Loc.LogMessage(stalled));
+        var wrapped = new InvalidOperationException("Installing failed", stalled);
+        string logged = Loc.LogText(wrapped);
+        Assert.Contains("The download stalled: nothing arrived for 30 seconds.", logged);
+        Assert.DoesNotContain("bloqué", logged);
+
+        // Only the message that was just made: another exception keeps its own text.
+        Loc.Remember("Prêt.", "Ready.", null);
+        var other = new IOException("Disk full").InEnglish();
+        Assert.Equal("Disk full", Loc.LogMessage(other));
+        // English needs nothing.
+        Assert.Equal("Ready.", Loc.LogMessage(new IOException(Loc.T("Ready.")).InEnglish()));
     }
 
     [Fact]
@@ -268,4 +309,18 @@ internal static class LocKeys
     /// <summary>The {n...} placeholders of a format string, sorted; {{ and }} are not placeholders.</summary>
     public static List<string> Placeholders(string text) =>
         Regex.Matches(text.Replace("{{", "").Replace("}}", ""), @"\{\d+(,[^}:]*)?(:[^}]*)?\}").Select(m => m.Value).OrderBy(p => p, StringComparer.Ordinal).ToList();
+
+    /// <summary>Whether string.Format takes the text (with enough values for any placeholder a key has).</summary>
+    public static bool Formats(string text)
+    {
+        try
+        {
+            _ = string.Format(CultureInfo.InvariantCulture, text, Enumerable.Range(0, 10).Select(i => (object)("x" + i)).ToArray());
+            return true;
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+    }
 }

@@ -31,6 +31,13 @@ public sealed class TsPackage
     [JsonIgnore]
     public bool IsGitHubOnly { get; init; }
 
+    /// <summary>
+    /// Thunderstore rejected the package's Void Crew listing: a lobby can still bring it in from the mod's own GitHub
+    /// releases (see LauncherService.FreshenLobbyAsync), never with Thunderstore's files, and it isn't in the MODS list.
+    /// </summary>
+    [JsonIgnore]
+    public bool ListingRejected { get; init; }
+
     /// <summary>The newest version comes from voidcrewmod.com.</summary>
     [JsonIgnore]
     public bool LatestFromWebsite => Latest?.FromWebsite == true;
@@ -54,6 +61,15 @@ public sealed class TsPackage
         copy.Versions = extra.Where(v => Version(v.VersionNumber) == null).Concat(Versions)
             .OrderByDescending(v => v.VersionNumber, VersionNumber.Comparer).ToList();
         if (copy.Versions.Count > 0 && copy.Versions.Max(v => v.DateCreated) is var newest && newest > copy.DateUpdated) copy.DateUpdated = newest;
+        return copy;
+    }
+
+    /// <summary>A copy of this package with <paramref name="version"/> as its only version (and none of its own).</summary>
+    public TsPackage WithOnly(TsVersion version)
+    {
+        TsPackage copy = WithVersions(Array.Empty<TsVersion>());
+        copy.Versions = new List<TsVersion> { version };
+        if (version.DateCreated > copy.DateUpdated) copy.DateUpdated = version.DateCreated;
         return copy;
     }
 }

@@ -161,6 +161,25 @@ public class ModNeedTests
     }
 
     [Fact]
+    public void HOST_tab_choices_find_their_mod_in_any_case_after_a_restart()
+    {
+        using var temp = new TempFolder();
+        AppPaths paths = temp.AppPaths();
+        var settings = new LauncherSettings { BridgeToken = "t" };
+        settings.Host.ModNeeds["Jack_Modding-Speedometer"] = ModNeed.Everyone;
+        settings.Save(paths);
+
+        // As the next start reads settings.json: still any case, as mod ids are everywhere else.
+        LauncherSettings loaded = LauncherSettings.Load(paths);
+        Assert.Equal(ModNeed.Everyone, loaded.Host.ModNeeds["jack_modding-speedometer"]);
+        Assert.Equal(ModNeed.Everyone, new HostNeeds(Array.Empty<InstalledMod>(), loaded.Host.ModNeeds, null).Chosen("JACK_MODDING-SPEEDOMETER"));
+
+        // A file that has the same id twice in different cases (written before) still loads, with one of them.
+        File.WriteAllText(paths.SettingsFile, """{"bridgeToken":"t","host":{"modNeeds":{"A-Mod":"HostOnly","a-mod":"Everyone"}}}""");
+        Assert.Single(LauncherSettings.Load(paths).Host.ModNeeds);
+    }
+
+    [Fact]
     public void Mods_the_game_checked_when_you_hosted_are_remembered_for_the_HOST_tab()
     {
         using var temp = new TempFolder();
@@ -305,7 +324,7 @@ internal static class PluginDlls
         Runtime,
     }
 
-    public static string Write(string folder, string guid, bool voidPlugin, Getter getter = Getter.None, int type = 30, string? declared = null)
+    public static string Write(string folder, string guid, bool voidPlugin, Getter getter = Getter.None, int type = 30, string? declared = null, string version = "1.0.0")
     {
         string name = "Plugin" + System.Guid.NewGuid().ToString("N");
         var assembly = new PersistedAssemblyBuilder(new AssemblyName(name), typeof(object).Assembly);
@@ -321,7 +340,7 @@ internal static class PluginDlls
         attribute.CreateType();
 
         TypeBuilder plugin = module.DefineType("Mod.Plugin", TypeAttributes.Public | TypeAttributes.Class);
-        plugin.SetCustomAttribute(constructor, Blob(guid, "Test Mod", "1.0.0"));
+        plugin.SetCustomAttribute(constructor, Blob(guid, "Test Mod", version));
         plugin.CreateType();
 
         if (voidPlugin)

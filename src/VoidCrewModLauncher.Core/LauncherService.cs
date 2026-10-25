@@ -189,7 +189,7 @@ public sealed class LauncherService : IDisposable
             {
                 // Thunderstore is down (or timed out): voidcrewmod.com's mods still work when it answered.
                 if ((await siteTask).Count == 0) throw;
-                AppLog.Warn($"Thunderstore couldn't be reached ({e.Message}); using voidcrewmod.com's mods only.");
+                AppLog.Warn($"Thunderstore couldn't be reached ({Loc.LogMessage(e)}); using voidcrewmod.com's mods only.");
                 packages = new List<TsPackage>();
             }
             // voidcrewmod.com first: its versions and downloads win over Thunderstore's for a mod both have.
@@ -310,16 +310,9 @@ public sealed class LauncherService : IDisposable
             .Take(MaxLobbyLookups).ToList();
         List<TsPackage> fresh = await FewAtATimeAsync<LobbyMod, TsPackage>(wanted, async mod =>
         {
-            TsVersion? exact = await Thunderstore.GetVersionAsync(mod.PackageId!, mod.Version, cancel);
             TsPackage? package = mod.Package ?? Index.Find(mod.PackageId) ?? (await Thunderstore.GetCurrentAsync(new[] { mod.PackageId! }, cancel)).FirstOrDefault();
-            if (package == null)
-            {
-                // Not listed for Void Crew (Thunderstore rejected the listing): its GitHub release can still be used,
-                // never Thunderstore's files.
-                package = await Thunderstore.GetForGitHubAsync(mod.PackageId!, cancel);
-                if (package == null) return null;
-                exact = null;
-            }
+            if (package == null || package.ListingRejected) return await FromRejectedListingAsync(mod, cancel);
+            TsVersion? exact = await Thunderstore.GetVersionAsync(mod.PackageId!, mod.Version, cancel);
             // A host who got a newer version from the mod's GitHub releases: the same release.
             if (exact == null && Settings.GitHubUpdates && GitHubRepo.Parse(package.LatestOnThunderstore?.WebsiteUrl) is { } repo)
             {
@@ -329,6 +322,23 @@ public sealed class LauncherService : IDisposable
             return exact != null ? package.WithVersions(new[] { exact }) : null;
         }, cancel);
         return Merge(fresh);
+    }
+
+    /// <summary>
+    /// A lobby's mod that isn't listed for Void Crew because Thunderstore rejected the listing (it rejected Ship
+    /// Customizer's): the package with the host's version from the mod's GitHub releases as its only version, never with
+    /// Thunderstore's files, and only for authors the launcher knows (<see cref="ModPolicy.MayUseRejectedListing"/>). The
+    /// release must be the package's own zip: plugin DLLs would go into the rejected listing's files. Null otherwise.
+    /// </summary>
+    private async Task<TsPackage?> FromRejectedListingAsync(LobbyMod mod, CancellationToken cancel)
+    {
+        if (!Settings.GitHubUpdates || !ModPolicy.MayUseRejectedListing(mod.PackageId)) return null;
+        TsPackage? rejected = await Thunderstore.GetForGitHubAsync(mod.PackageId!, cancel);
+        if (rejected is not { ListingRejected: true } || GitHubRepo.Parse(rejected.LatestOnThunderstore?.WebsiteUrl) is not { } repo) return null;
+        TsVersion? release = await GitHub.GetReleaseAsync(repo, rejected, mod.Version, cancel);
+        if (release?.GitHub?.Package == null || !Usable(rejected, release)) return null;
+        AppLog.Info($"Thunderstore rejected {rejected.FullName}'s Void Crew listing; a lobby runs {release.VersionNumber}, which comes from its GitHub releases ({repo}).");
+        return rejected.WithOnly(release);
     }
 
     /// <summary>Merges fresh package data into the list and tells the UI which packages changed.</summary>
@@ -485,11 +495,15 @@ public sealed class LauncherService : IDisposable
     /// <summary>What joining players need of each of your mods when you host (the HOST tab shows the same).</summary>
     public HostNeeds CurrentHostNeeds() => new(Library.Enabled, Settings.Host.ModNeeds, Settings.Host.CheckedInGame);
 
-    /// <summary>The mods of a Play or Host launch: every enabled mod and its dependencies, downloading what's missing.</summary>
+    /// <summary>
+    /// The mods of a Play or Host launch: every enabled mod and its dependencies, downloading what's missing. A mod that
+    /// isn't on Thunderstore (one added from your PC, or no longer listed) brings the dependencies its manifest names.
+    /// </summary>
     public async Task<List<RuntimeMod>> PlayModsAsync(CancellationToken cancel = default)
     {
         var mods = new List<RuntimeMod>();
         var roots = new List<(TsPackage, TsVersion)>();
+        var unlistedNeed = new List<(TsPackage, TsVersion)>();
         HostNeeds needs = CurrentHostNeeds();
         foreach (InstalledMod mod in Library.Enabled)
         {
@@ -503,9 +517,15 @@ public sealed class LauncherService : IDisposable
                 continue;
             }
             string folder = Store.VersionDirectory(mod.Id, mod.Version);
-            if (Directory.Exists(folder)) mods.Add(new RuntimeMod(mod.Id, mod.Name, mod.Version, folder, mod.IsLocal, need, byUser));
+            if (Directory.Exists(folder))
+            {
+                mods.Add(new RuntimeMod(mod.Id, mod.Name, mod.Version, folder, mod.IsLocal, need, byUser));
+                unlistedNeed.AddRange(Mods.DependencyRoots(mod));
+            }
             else AppLog.Warn($"{mod.Id} {mod.Version} is turned on but isn't in the store any more; leaving it out.");
         }
+        // After your own mods, so a dependency you have turned on loads at your version.
+        roots.AddRange(unlistedNeed);
 
         var enabledIds = new HashSet<string>(Library.Enabled.Select(m => m.Id), StringComparer.OrdinalIgnoreCase);
         foreach ((TsPackage package, TsVersion version) in Mods.Resolve(roots))
@@ -530,7 +550,7 @@ public sealed class LauncherService : IDisposable
             AppLog.Info($"Also loading {copy.Id} {copy.Version}: another enabled mod needs it.");
             mods.Add(new RuntimeMod(copy.Id, copy.Name, copy.Version, folder, copy.IsLocal, needs.Effective(copy)));
         }
-        return mods;
+        return Mods.WithoutDuplicatePlugins(mods);
     }
 
     // ---------------------------------------------------------------- launching
@@ -566,8 +586,8 @@ public sealed class LauncherService : IDisposable
 
     private async Task LaunchWithAsync(LaunchMode mode, List<RuntimeMod> mods, HostCommand? host, JoinCommand? join, CancellationToken cancel)
     {
-        string game = GameDirectory ?? throw new InvalidOperationException(Loc.T("Void Crew wasn't found. Choose its folder on the SETTINGS tab."));
-        if (GameProcess.IsRunning()) throw new InvalidOperationException(Loc.T("Void Crew is already running. Close it first."));
+        string game = GameDirectory ?? throw new InvalidOperationException(Loc.T("Void Crew wasn't found. Choose its folder on the SETTINGS tab.")).InEnglish();
+        if (GameProcess.IsRunning()) throw new InvalidOperationException(Loc.T("Void Crew is already running. Close it first.")).InEnglish();
         mods = mods.GroupBy(m => m.Id, StringComparer.OrdinalIgnoreCase).Select(g => g.First()).ToList();
 
         string bepInExPack = await Mods.EnsureBepInExAsync(StatusProgress(), cancel);

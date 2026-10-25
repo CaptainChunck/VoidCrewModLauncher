@@ -26,12 +26,19 @@ namespace VoidCrewModLauncher.Bridge
         /// <summary>The mod that registered each of the game's runtime assets and external mods (first one wins).</summary>
         private static readonly Dictionary<GUIDUnion, string> Registrations = new Dictionary<GUIDUnion, string>();
 
+        /// <summary>
+        /// The mod of every assembly seen so far (null for the game's, BepInEx's and the bridge's own): a mod registers its
+        /// assets one by one, and each call's stack is looked up, so its DLL's path is worked out once.
+        /// </summary>
+        private static readonly Dictionary<Assembly, string> ModsByAssembly = new Dictionary<Assembly, string>();
+
         private static string _pluginsRoot;
 
         /// <summary>
         /// Called after RuntimeAssetsRegister.RegisterAsset, RegisterExternalMod and AddAssetEffect: notes which mod made
-        /// the call, from the first method on the stack that lives in a DLL under BepInEx\plugins. Registrations made
-        /// before the bridge loaded aren't seen here; <see cref="RequiredByGame"/> traces those through the asset's type.
+        /// the call, from the first method on the stack that lives in a DLL under BepInEx\plugins. The bridge loads before
+        /// the other plugins (its GUID sorts first), but registrations made before it loaded aren't seen here;
+        /// <see cref="RequiredByGame"/> traces those through the asset's type.
         /// </summary>
         public static void NoteRegistration(GUIDUnion id)
         {
@@ -111,12 +118,21 @@ namespace VoidCrewModLauncher.Bridge
                 hasAllMods = highest != null && Convert.ToInt32(highest) == (int)VoidManagerType.All;
                 var list = AccessTools.Field(managerType, "MyModList")?.GetValue(manager) as Array;
                 if (list == null) return needs;
+                // Looked up once for the list's type, not for every entry.
+                Type blockType = null;
+                PropertyInfo guidProperty = null;
+                PropertyInfo typeProperty = null;
                 foreach (object block in list)
                 {
                     if (block == null) continue;
-                    Type blockType = block.GetType();
-                    string guid = AccessTools.Property(blockType, "ModGUID")?.GetValue(block, null) as string;
-                    object mpType = AccessTools.Property(blockType, "MPType")?.GetValue(block, null);
+                    if (block.GetType() != blockType)
+                    {
+                        blockType = block.GetType();
+                        guidProperty = AccessTools.Property(blockType, "ModGUID");
+                        typeProperty = AccessTools.Property(blockType, "MPType");
+                    }
+                    string guid = guidProperty != null ? guidProperty.GetValue(block, null) as string : null;
+                    object mpType = typeProperty != null ? typeProperty.GetValue(block, null) : null;
                     if (guid == null || mpType == null) continue;
                     string modId = ModOfPlugin(guid);
                     if (modId == null) continue;
@@ -173,14 +189,21 @@ namespace VoidCrewModLauncher.Bridge
         public static string ModOfAssembly(Assembly assembly)
         {
             if (assembly == null || assembly == typeof(ModChecks).Assembly || assembly.IsDynamic) return null;
+            string mod;
+            lock (ModsByAssembly)
+            {
+                if (ModsByAssembly.TryGetValue(assembly, out mod)) return mod;
+            }
             try
             {
-                return ModOfLocation(assembly.Location);
+                mod = ModOfLocation(assembly.Location);
             }
             catch (NotSupportedException)
             {
-                return null;
+                mod = null;
             }
+            lock (ModsByAssembly) ModsByAssembly[assembly] = mod;
+            return mod;
         }
 
         /// <summary>The folder under BepInEx\plugins that holds <paramref name="location"/>: the launcher names it after the mod.</summary>

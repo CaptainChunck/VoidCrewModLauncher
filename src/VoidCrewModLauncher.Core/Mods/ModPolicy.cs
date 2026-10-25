@@ -88,12 +88,12 @@ public static class ModPolicy
         _ => mod.GuessedNeed == ModNeed.ClientOnly,
     };
 
-    public static string Describe(ModNeed need) => need switch
-    {
-        ModNeed.Everyone => "Everyone needs it",
-        ModNeed.Session => "Host's mod (modded lobby)",
-        ModNeed.HostOnly => "Host's mod",
-        ModNeed.ClientOnly => "Host's own client mod",
-        _ => "Probably needed",
-    };
+    /// <summary>
+    /// Authors whose mods a lobby may bring in from their GitHub releases when Thunderstore rejected the mod's Void Crew
+    /// listing (it rejected Ship Customizer's): with the listing rejected, nothing else vouches for what the release holds.
+    /// </summary>
+    private static readonly HashSet<string> KnownAuthors = new(StringComparer.OrdinalIgnoreCase) { "Captain_Chuncks_Mods" };
+
+    /// <summary>A package ("Namespace-Name") that may come from its GitHub releases when its Thunderstore listing was rejected.</summary>
+    public static bool MayUseRejectedListing(string? id) => PackageReference.Parse(id) is { } reference && KnownAuthors.Contains(reference.Namespace);
 }

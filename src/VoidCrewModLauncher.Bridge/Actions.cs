@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using CG.GameLoopStateMachine;
 using CG.GameLoopStateMachine.GameStates;
@@ -15,9 +16,28 @@ using VoidCrewModLauncher.Protocol;
 namespace VoidCrewModLauncher.Bridge
 {
     /// <summary>
+    /// Why the game can't do what the launcher asked: one of <see cref="BridgeErrors"/>, which the launcher says in the
+    /// player's language, the English sentence (what launchers up to 0.9.1 show, and what the logs say) and the details
+    /// that go into it.
+    /// </summary>
+    internal sealed class ActionError
+    {
+        public ActionError(string code, params string[] details)
+        {
+            Code = code;
+            Details = new List<string>(details);
+            Message = BridgeErrors.English(code, Details) ?? code;
+        }
+
+        public string Code { get; private set; }
+        public string Message { get; private set; }
+        public List<string> Details { get; private set; }
+    }
+
+    /// <summary>
     /// What the launcher can ask the game to do: join a room, host one, change region or quit. Each goes through the
     /// game's own code path (the states and menus the game uses for invites and its host panel), so the game's checks
-    /// all still apply. Called on the main thread; returns null when started, or a message saying why not.
+    /// all still apply. Called on the main thread; returns null when started, or why not.
     /// </summary>
     internal static class Actions
     {
@@ -47,41 +67,34 @@ namespace VoidCrewModLauncher.Bridge
             }
         }
 
-        public static string Join(JoinCommand command)
+        public static ActionError Join(JoinCommand command)
         {
-            if (command == null || string.IsNullOrEmpty(command.RoomId)) return "No lobby to join.";
+            if (command == null || string.IsNullOrEmpty(command.RoomId)) return new ActionError(BridgeErrors.NoLobby);
             GameStateMachine machine = Singleton<GameStateMachine>.Instance;
-            if (machine == null) return "Void Crew is still starting.";
+            if (machine == null) return new ActionError(BridgeErrors.Starting);
             IState state = machine.CurrentState;
-            if (Busy != null) return "Void Crew is already joining or hosting a lobby.";
-            if (PhotonNetwork.InRoom && PhotonNetwork.CurrentRoom.Name == command.RoomId) return "You're already in this lobby.";
-            if (!(state is GSMainMenu) && !(state is GSIngame)) return "Void Crew is busy right now (" + GameInfo.Phase() + "). Try again from the main menu or the hub.";
-            if (state is GSMainMenu && !GameInfo.InLobby) return "Void Crew isn't connected to its lobby server yet.";
+            if (Busy != null) return new ActionError(BridgeErrors.Busy);
+            if (PhotonNetwork.InRoom && PhotonNetwork.CurrentRoom.Name == command.RoomId) return new ActionError(BridgeErrors.InThisLobby);
+            if (!(state is GSMainMenu) && !(state is GSIngame)) return new ActionError(BridgeErrors.GameBusy, GameInfo.Phase());
+            if (state is GSMainMenu && !GameInfo.InLobby) return new ActionError(BridgeErrors.NotConnected);
             // Leaving a mission ends it for the crew when you host; that's the player's call in the game, not the launcher's.
-            if (GameInfo.Phase() == "mission") return "You're on a mission. Leave it in the game first, then join from the hub or the main menu.";
+            if (GameInfo.Phase() == "mission") return new ActionError(BridgeErrors.OnMission);
             if (command.Modded && !GameInfo.CanJoinModded())
             {
                 GameInfo.AllowModdedJoins();
-                if (!GameInfo.CanJoinModded())
-                {
-                    return "This lobby is [mod_session] and your Void Crew settings don't allow joining those. " +
-                           "Turn on \"Can join [mod_session] games\" in the game's General settings, then join again.";
-                }
+                if (!GameInfo.CanJoinModded()) return new ActionError(BridgeErrors.ModdedJoinsOff);
             }
             MatchmakingRoom listed = GameInfo.ListedRoom(command.RoomId);
             if (listed != null && !GameInfo.Joinable(listed, PAL.Platform.GetPlatform(), GameInfo.HasCrossPlay()))
             {
-                if (listed.HostBlocked) return "You've blocked this lobby's host.";
-                return listed.IsCrossPlay ? "This lobby has crossplay on, and crossplay isn't allowed for your account." : "This lobby is on another platform and has crossplay off.";
+                if (listed.HostBlocked) return new ActionError(BridgeErrors.HostBlocked);
+                return new ActionError(listed.IsCrossPlay ? BridgeErrors.CrossPlayNotAllowed : BridgeErrors.OtherPlatform);
             }
 
             PhotonService service = PunSingleton<PhotonService>.Instance;
             Region current = service != null ? service.CurrentRegion() : null;
             bool otherRegion = !string.IsNullOrEmpty(command.Region) && current != null && current.Code != command.Region;
-            if (otherRegion && !(state is GSMainMenu))
-            {
-                return "This lobby is in another region (" + command.Region + "). Leave your game, then join it from the main menu.";
-            }
+            if (otherRegion && !(state is GSMainMenu)) return new ActionError(BridgeErrors.OtherRegion, command.Region);
 
             Log.Info("Joining " + (string.IsNullOrEmpty(command.RoomName) ? command.RoomId : command.RoomName + " (" + command.RoomId + ")") +
                      (string.IsNullOrEmpty(command.Region) ? "" : " in region " + command.Region) + " for the launcher.");
@@ -108,22 +121,22 @@ namespace VoidCrewModLauncher.Bridge
             machine.ChangeState<GSJoinExternalGame>();
         }
 
-        public static string Host(HostCommand command)
+        public static ActionError Host(HostCommand command)
         {
-            if (command == null) return "No lobby settings.";
-            if (Busy != null) return "Void Crew is already joining or hosting a lobby.";
-            if (!(GameInfo.CurrentState is GSMainMenu)) return "Lobbies are hosted from the main menu; leave the current game first.";
-            if (!GameInfo.InLobby) return "Void Crew isn't connected to its lobby server yet.";
-            if (!GameInfo.CanHost()) return "Void Crew only lets you host after you've finished its tutorial (the Awakening). Play it once, then host.";
+            if (command == null) return new ActionError(BridgeErrors.NoLobbySettings);
+            if (Busy != null) return new ActionError(BridgeErrors.Busy);
+            if (!(GameInfo.CurrentState is GSMainMenu)) return new ActionError(BridgeErrors.NotInMenu);
+            if (!GameInfo.InLobby) return new ActionError(BridgeErrors.NotConnected);
+            if (!GameInfo.CanHost()) return new ActionError(BridgeErrors.TutorialFirst);
 
             MatchMakingMenu menu = UnityEngine.Object.FindObjectOfType<MatchMakingMenu>();
-            if (menu == null) return "Void Crew's host panel isn't loaded yet.";
+            if (menu == null) return new ActionError(BridgeErrors.HostPanelMissing);
 
             Traverse traverse = Traverse.Create(menu);
             var nameField = traverse.Field("_roomNameField").GetValue<TextField>();
             var limit = traverse.Field("_playerLimit").GetValue<IntSetting>();
             MethodInfo start = AccessTools.Method(typeof(MatchMakingMenu), command.IsPublic ? "OnStartPublicGame" : "OnStartPrivateGame");
-            if (nameField == null || limit == null || start == null) return "This version of Void Crew's host panel is different from the one the launcher knows; host from the game's menu instead.";
+            if (nameField == null || limit == null || start == null) return new ActionError(BridgeErrors.HostPanelChanged);
 
             string name = string.IsNullOrWhiteSpace(command.Name) ? nameField.value : command.Name.Trim();
             nameField.value = WordFiltering.Censor(name);
@@ -169,42 +182,72 @@ namespace VoidCrewModLauncher.Bridge
                 }
             }
             if (Busy == null || Time.realtimeSinceStartup - _pendingSince < Timeout) return;
-            if (PendingJoin != null) JoinFinished(false, "Void Crew didn't join the lobby within " + (int)Timeout + " seconds.");
-            if (PendingHost) HostFinished(false, "Void Crew didn't open the lobby within " + (int)Timeout + " seconds.");
+            string seconds = ((int)Timeout).ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (PendingJoin != null) JoinFinished(false, new ActionError(BridgeErrors.JoinTimeout, seconds));
+            if (PendingHost) HostFinished(false, new ActionError(BridgeErrors.HostTimeout, seconds));
         }
 
         /// <param name="reason">Why the game left the lobby while joining it (kicked, mods or connection), when it did.</param>
-        public static void JoinFinished(bool ok, string error, string reason = null)
+        public static void JoinFinished(bool ok, ActionError error, string reason = null)
         {
             if (PendingJoin == null) return;
             string room = PendingJoin;
             PendingJoin = null;
             _joinAfterRegion = null;
             if (ok) Log.Info("Joined " + room + ".");
-            else Log.Warn("Joining " + room + " failed: " + error);
-            if (Report != null) Report(new JoinResultMessage { RoomId = room, Ok = ok, Error = error, Reason = reason });
+            else Log.Warn("Joining " + room + " failed: " + (error != null ? error.Message : "?"));
+            if (Report != null) Report(JoinResult(room, ok, error, reason));
         }
 
-        public static void HostFinished(bool ok, string error)
+        public static void HostFinished(bool ok, ActionError error)
         {
             if (!PendingHost) return;
             PendingHost = false;
             string room = ok && PhotonNetwork.InRoom ? PhotonNetwork.CurrentRoom.Name : null;
             if (ok) Log.Info("Lobby " + room + " is open.");
-            else Log.Warn("Hosting failed: " + error);
-            if (Report != null) Report(new HostResultMessage { Ok = ok, Error = error, RoomId = room });
+            else Log.Warn("Hosting failed: " + (error != null ? error.Message : "?"));
+            if (Report != null) Report(HostResult(ok, error, room));
+        }
+
+        /// <summary>A join's outcome for the launcher.</summary>
+        public static JoinResultMessage JoinResult(string roomId, bool ok, ActionError error, string reason = null)
+        {
+            ActionError failure = ok ? null : error;
+            return new JoinResultMessage
+            {
+                RoomId = roomId,
+                Ok = ok,
+                Error = failure != null ? failure.Message : null,
+                ErrorCode = failure != null ? failure.Code : null,
+                ErrorDetails = failure != null && failure.Details.Count > 0 ? failure.Details : null,
+                Reason = reason,
+            };
+        }
+
+        /// <summary>A host's outcome for the launcher.</summary>
+        public static HostResultMessage HostResult(bool ok, ActionError error, string roomId = null)
+        {
+            ActionError failure = ok ? null : error;
+            return new HostResultMessage
+            {
+                Ok = ok,
+                Error = failure != null ? failure.Message : null,
+                ErrorCode = failure != null ? failure.Code : null,
+                ErrorDetails = failure != null && failure.Details.Count > 0 ? failure.Details : null,
+                RoomId = roomId,
+            };
         }
 
         /// <summary>Photon's join error codes in words.</summary>
-        public static string JoinError(short code, string message)
+        public static ActionError JoinError(short code, string message)
         {
             switch (code)
             {
-                case 32758: return "The lobby doesn't exist any more.";
-                case 32765: return "The lobby is full.";
-                case 32764: return "The lobby is closed (its crew may have started a mission).";
-                case 32746: return "You're already in this lobby.";
-                default: return "Photon refused the join (" + code + "): " + message;
+                case 32758: return new ActionError(BridgeErrors.LobbyGone);
+                case 32765: return new ActionError(BridgeErrors.LobbyFull);
+                case 32764: return new ActionError(BridgeErrors.LobbyClosed);
+                case 32746: return new ActionError(BridgeErrors.InThisLobby);
+                default: return new ActionError(BridgeErrors.JoinRefused, code.ToString(System.Globalization.CultureInfo.InvariantCulture), message ?? "");
             }
         }
     }

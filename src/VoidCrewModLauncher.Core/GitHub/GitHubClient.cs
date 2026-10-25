@@ -124,6 +124,14 @@ public sealed class GitHubClient : IDisposable
         await _requests.WaitAsync(cancel);
         try
         {
+            // Another lookup may have asked for the same while this one waited (lobbies run the same mods).
+            lock (_cacheLock)
+            {
+                if (_cache != null && _cache.TryGetValue(path, out CachedAnswer? meanwhile) && DateTime.UtcNow - meanwhile.FetchedUtc < FreshFor)
+                {
+                    return Parse(path, meanwhile);
+                }
+            }
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancel);
             timeout.CancelAfter(ApiTimeout);
             using var request = new HttpRequestMessage(HttpMethod.Get, Api + path);
@@ -224,15 +232,27 @@ public sealed class GitHubClient : IDisposable
         return package.WithVersions(new[] { version });
     }
 
-    /// <summary>The release of one version (tag "v1.2.3" or "1.2.3") as a version of <paramref name="package"/>, or null.</summary>
+    /// <summary>How many of a repo's newest releases <see cref="GetReleaseAsync"/> looks through (GitHub's most per request).</summary>
+    internal const int ReleasesLookedUp = 100;
+
+    /// <summary>
+    /// The release of one version (tag "v1.2.3" or "1.2.3") as a version of <paramref name="package"/>, or null. Looked up
+    /// in the list of the repo's newest releases: one request per repo, however many versions lobbies run, kept and asked
+    /// again with its ETag (which GitHub doesn't count); asking for each version's tag cost two counted requests, and a
+    /// version that isn't there counted too. The server browser looks up lobbies' versions without a click, and GitHub
+    /// allows 60 requests an hour without an account.
+    /// </summary>
     public async Task<TsVersion?> GetReleaseAsync(GitHubRepo repo, TsPackage package, string version, CancellationToken cancel = default)
     {
-        // The version can come from another player's lobby: only real version numbers make a tag to ask for.
+        // The version can come from another player's lobby: only real version numbers are looked for.
         if (!VersionNumber.IsValid(version)) return null;
-        foreach (string tag in new[] { "v" + version, version })
+        using JsonDocument? releases = await GetAsync($"/repos/{repo.Owner}/{repo.Name}/releases?per_page={ReleasesLookedUp}", cancel);
+        if (releases == null || releases.RootElement.ValueKind != JsonValueKind.Array) return null;
+        foreach (JsonElement release in releases.RootElement.EnumerateArray())
         {
-            using JsonDocument? release = await GetAsync($"/repos/{repo.Owner}/{repo.Name}/releases/tags/{Uri.EscapeDataString(tag)}", cancel);
-            if (release != null && ToVersion(release.RootElement, repo, package) is { } found && VersionNumber.Same(found.VersionNumber, version)) return found;
+            string tag = (Text(release, "tag_name") ?? "").Trim().TrimStart('v', 'V');
+            if (!VersionNumber.IsValid(tag) || !VersionNumber.Same(tag, version)) continue;
+            if (ToVersion(release, repo, package) is { } found) return found;
         }
         return null;
     }
@@ -356,16 +376,15 @@ public sealed class GitHubClient : IDisposable
         long done;
         try
         {
-            using HttpResponseMessage response = await _http.GetAsync(asset.Url, HttpCompletionOption.ResponseHeadersRead, cancel);
+            using HttpResponseMessage response = await _http.GetAsync(asset.Url, HttpCompletionOption.ResponseHeadersRead, cancel).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
             long total = response.Content.Headers.ContentLength ?? asset.Size;
-            await using Stream source = await response.Content.ReadAsStreamAsync(cancel);
+            await using Stream source = await response.Content.ReadAsStreamAsync(cancel).ConfigureAwait(false);
             await using FileStream file = File.Create(target);
-            done = await ThunderstoreClient.CopyAsync(source, file, StallTimeout, (buffer, read, sofar) =>
+            done = await ThunderstoreClient.CopyAsync(source, file, StallTimeout, (buffer, read, _) => hash.AppendData(buffer, 0, read), sofar =>
             {
-                hash.AppendData(buffer, 0, read);
                 if (total > 0) progress?.Report(Math.Min(1.0, sofar / (double)total));
-            }, cancel);
+            }, cancel).ConfigureAwait(false);
         }
         catch
         {
@@ -383,7 +402,7 @@ public sealed class GitHubClient : IDisposable
         if ((asset.Size > 0 && done != asset.Size) || (asset.Sha256 != null && actual != asset.Sha256))
         {
             File.Delete(target);
-            throw new InvalidDataException(Loc.F("{0} from GitHub doesn't match the size or checksum GitHub lists for it.", asset.Name));
+            throw new InvalidDataException(Loc.F("{0} from GitHub doesn't match the size or checksum GitHub lists for it.", asset.Name)).InEnglish();
         }
         progress?.Report(1.0);
         return target;

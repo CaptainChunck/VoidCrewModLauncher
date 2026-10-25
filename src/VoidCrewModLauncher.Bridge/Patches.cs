@@ -12,8 +12,8 @@ namespace VoidCrewModLauncher.Bridge
 {
     /// <summary>
     /// The few places the bridge listens to the game. None of them change what the game does: they only report when a
-    /// room was created or joined, when a join failed, why the game left a room (with the names of missing mods), and
-    /// which mod registered each of the game's runtime assets and external mods (for <see cref="ModChecks"/>).
+    /// room was created or joined, when a join or host failed, why the game left a room (with the names of missing
+    /// mods), and which mod registered each of the game's runtime assets and external mods (for <see cref="ModChecks"/>).
     /// Each patch is applied on its own, so a game update that moves one method only turns off that report.
     /// </summary>
     internal static class Patches
@@ -21,7 +21,8 @@ namespace VoidCrewModLauncher.Bridge
         public static void Apply(Harmony harmony)
         {
             Postfix(harmony, typeof(PhotonService), "OnCreatedRoom", nameof(CreatedRoom));
-            Postfix(harmony, typeof(PhotonService), "OnCreateRoomFailed", nameof(CreateRoomFailed));
+            // A prefix: it reads whether the game will try again before the game counts this attempt.
+            Prefix(harmony, typeof(PhotonService), "OnCreateRoomFailed", nameof(CreateRoomFailed));
             Postfix(harmony, typeof(PhotonService), "OnJoinedRoom", nameof(JoinedRoom));
             // A prefix: the game's own handler turns the failure into a disconnect, which would hide Photon's reason.
             Prefix(harmony, typeof(PhotonService), "OnJoinRoomFailed", nameof(JoinRoomFailed));
@@ -75,10 +76,26 @@ namespace VoidCrewModLauncher.Bridge
             }
         }
 
-        private static void CreateRoomFailed(short returnCode, string message)
+        /// <summary>The attempts the game has left at creating a room (PhotonService._currentAttempts), when this game version has it.</summary>
+        private static readonly FieldInfo CreateAttemptsLeft = AccessTools.Field(typeof(PhotonService), "_currentAttempts");
+
+        private static void CreateRoomFailed(PhotonService __instance, short returnCode, string message)
         {
-            // The game retries a few times on its own; only report once it has given up.
-            Log.Warn("Photon could not create the room (" + returnCode + "): " + message);
+            try
+            {
+                Log.Warn("Photon could not create the room (" + returnCode + "): " + message);
+                // The game tries again while it has attempts left, and gives up on this one when it has none: only then is the
+                // host a failure the launcher hears about (else it waits for the bridge's timeout).
+                object left = CreateAttemptsLeft != null ? CreateAttemptsLeft.GetValue(__instance) : null;
+                if (left is int && (int)left <= 0)
+                {
+                    Actions.HostFinished(false, new ActionError(BridgeErrors.CreateFailed, returnCode.ToString(System.Globalization.CultureInfo.InvariantCulture), message ?? ""));
+                }
+            }
+            catch (Exception e)
+            {
+                Log.Failure("Reporting the failed host", e);
+            }
         }
 
         /// <summary>The last room the game was in, for a disconnect that comes after the room is gone.</summary>
@@ -164,9 +181,11 @@ namespace VoidCrewModLauncher.Bridge
                 if (Actions.PendingJoin != null)
                 {
                     // With the reason, so the launcher leaves a mod mismatch to the message below (it names the mods).
-                    Actions.JoinFinished(false, message.Reason == "mods" ? "The lobby's mods don't match yours." : message.Reason == "kicked" ? "The host removed you." : "The connection was lost.",
-                        message.Reason);
+                    string code = message.Reason == "mods" ? BridgeErrors.ModsMismatch : message.Reason == "kicked" ? BridgeErrors.Kicked : BridgeErrors.ConnectionLost;
+                    Actions.JoinFinished(false, new ActionError(code), message.Reason);
                 }
+                // A host the game lost its connection during never opens: said now, not after the bridge's timeout.
+                if (Actions.PendingHost) Actions.HostFinished(false, new ActionError(BridgeErrors.ConnectionLost));
                 if (Actions.Report != null) Actions.Report(message);
             }
             catch (Exception e)
@@ -178,10 +197,13 @@ namespace VoidCrewModLauncher.Bridge
         private static void AddNames(List<ModNameDto> names, List<GUIDUnion> ids, GSPhotonDisconnected state)
         {
             if (ids == null) return;
+            RuntimeAssetsRegister register = RuntimeAssetsRegister.Instance;
             foreach (GUIDUnion id in ids)
             {
                 RuntimeAssetInfo info;
-                if (RuntimeAssetsRegister.Instance != null && RuntimeAssetsRegister.Instance.TryGetInfo(id, out info))
+                // Not TryGetInfo: it warns in the game's log about every id this player hasn't registered, which is every
+                // missing one, before the host's descriptions below name it.
+                if (register != null && (register.TryGetAssetInfo(id, out info) || register.TryGetModInfo(id, out info)) && info != null)
                 {
                     names.Add(new ModNameDto { Name = info.Name, DisplayName = info.DisplayName });
                 }

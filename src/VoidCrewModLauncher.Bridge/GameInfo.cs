@@ -278,6 +278,7 @@ namespace VoidCrewModLauncher.Bridge
         {
             Dictionary<string, RoomInfo> infos = MatchmakingController.I.GetCachedRoomList();
             if (infos == null) return 0;
+            var parsed = CachedRoomsField != null ? CachedRoomsField.GetValue(MatchmakingController.I) as Dictionary<string, MatchmakingRoom> : null;
             unchecked
             {
                 int hash = infos.Count;
@@ -295,6 +296,14 @@ namespace VoidCrewModLauncher.Bridge
                         properties += (property.Key != null ? property.Key.GetHashCode() : 0) * 31 + ValueHash(property.Value);
                     }
                     roomHash = roomHash * 31 + properties;
+                    // The game fills these in a moment after the room arrives (once it has checked its block list): a blocked
+                    // host's room then leaves the list, and the host's name may change.
+                    MatchmakingRoom room;
+                    if (parsed != null && parsed.TryGetValue(pair.Key, out room) && room != null)
+                    {
+                        roomHash = roomHash * 31 + (room.HostBlocked ? 1 : 0);
+                        roomHash = roomHash * 31 + (room.HostName != null ? room.HostName.GetHashCode() : 0);
+                    }
                     hash += roomHash * -1640531535;
                 }
                 return hash;

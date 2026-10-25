@@ -12,6 +12,10 @@ namespace VoidCrewModLauncher.Core.Website;
 /// </summary>
 public sealed class WebsiteClient : IDisposable
 {
+    /// <summary>
+    /// Points the launcher at a test copy of the site (README); in every build, like VCML_UPDATE_FEED (whatever can set it
+    /// can already change the launcher's files), and the log says when it is in use.
+    /// </summary>
     public const string SiteVariable = "VCML_SITE_URL";
     private static readonly TimeSpan CacheAge = TimeSpan.FromMinutes(5);
 
@@ -31,6 +35,7 @@ public sealed class WebsiteClient : IDisposable
         _http = handler == null ? new HttpClient() : new HttpClient(handler, disposeHandler: false);
         _http.Timeout = TimeSpan.FromSeconds(15);
         _http.DefaultRequestHeaders.UserAgent.ParseAdd(AppInfo.UserAgent);
+        if (Environment.GetEnvironmentVariable(SiteVariable) is { Length: > 0 }) AppLog.Warn($"{SiteVariable} is set: reading mods from {Site} instead of {AppInfo.WebsiteUrl}.");
     }
 
     /// <summary>The site's address (VCML_SITE_URL can point at a test copy).</summary>

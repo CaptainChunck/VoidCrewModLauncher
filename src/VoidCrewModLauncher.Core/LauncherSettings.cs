@@ -99,8 +99,22 @@ public sealed class HostSettings
     public int MaxPlayers { get; set; } = 4;
     public bool CrossPlay { get; set; } = true;
 
-    /// <summary>The host's choice of what joining players need, per mod id; mods not listed use the launcher's guess.</summary>
-    public Dictionary<string, ModNeed> ModNeeds { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>
+    /// The host's choice of what joining players need, per mod id (any case, as everywhere else); mods not listed use the
+    /// launcher's guess. Reading settings.json gives a dictionary of its own, which is copied into one that ignores case.
+    /// </summary>
+    public Dictionary<string, ModNeed> ModNeeds
+    {
+        get => _modNeeds;
+        set
+        {
+            var needs = new Dictionary<string, ModNeed>(StringComparer.OrdinalIgnoreCase);
+            foreach (KeyValuePair<string, ModNeed> pair in value ?? new Dictionary<string, ModNeed>()) needs[pair.Key] = pair.Value;
+            _modNeeds = needs;
+        }
+    }
+
+    private Dictionary<string, ModNeed> _modNeeds = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Mod ids joining players were checked for when you last hosted with them, as the bridge reported it, that the
