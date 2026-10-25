@@ -18,14 +18,17 @@ public sealed class JoinWindow : Window
     private readonly TextBlock _summary;
     private readonly Button _join;
     private readonly bool _running;
+    private readonly bool _inGame;
 
     /// <param name="needsRestart">Whether the running game has to restart for this mod set (ticking mods can change it).</param>
-    public JoinWindow(JoinPlan plan, Func<JoinPlan, ResolvedJoin> resolve, Func<ResolvedJoin, bool> needsRestart, bool running)
+    /// <param name="inGame">The game is in a hub or on a mission: a restart leaves it at once, which the summary says.</param>
+    public JoinWindow(JoinPlan plan, Func<JoinPlan, ResolvedJoin> resolve, Func<ResolvedJoin, bool> needsRestart, bool running, bool inGame = false)
     {
         _plan = plan;
         _resolve = resolve;
         _needsRestart = needsRestart;
         _running = running;
+        _inGame = inGame;
         _join = Dialogs.MakeButton(Loc.T("JOIN"), ButtonKind.Primary);
         var body = new StackPanel { Width = 600 };
 
@@ -126,10 +129,13 @@ public sealed class JoinWindow : Window
         string downloads = join.Downloads.Count == 0 ? ""
             : join.Downloads.Count == 1 ? Loc.F("Downloads {0} mod ({1}).", join.Downloads.Count, Format.Bytes(join.DownloadBytes)) + " "
             : Loc.F("Downloads {0} mods ({1}).", join.Downloads.Count, Format.Bytes(join.DownloadBytes)) + " ";
+        bool leavesGame = restart && _inGame;
         string game = !_running ? Loc.T("Starts Void Crew and joins.")
+            : leavesGame ? Loc.T("You're in a game right now. Void Crew restarts with the lobby's mods and joins it.")
             : restart ? Loc.T("Restarts Void Crew and joins.")
             : Loc.T("Joins right away.");
         _summary.Text = downloads + game;
+        _summary.Foreground = leavesGame ? Brush("Orange") : Brushes.White;
         _join.Content = restart ? Loc.T("RESTART AND JOIN") : Loc.T("JOIN");
     }
 

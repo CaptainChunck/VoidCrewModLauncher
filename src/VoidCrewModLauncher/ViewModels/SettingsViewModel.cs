@@ -69,13 +69,22 @@ public partial class SettingsViewModel : ObservableObject
                 System.Windows.Application.Current?.Dispatcher.BeginInvoke(() => OnPropertyChanged(nameof(SelectedLanguage)));
                 return;
             }
+            string? before = Service.Settings.Language;
             Service.Settings.Language = value.Code;
-            Service.SaveSettings();
+            if (!_main.SaveSettings())
+            {
+                // Not saved: the restarted launcher would come back in the old language.
+                Service.Settings.Language = before;
+                System.Windows.Application.Current?.Dispatcher.BeginInvoke(() => OnPropertyChanged(nameof(SelectedLanguage)));
+                return;
+            }
             OnPropertyChanged();
-            App.Restart(_main.LauncherArguments);
+            App.Restart(_main.RestartArguments);
         }
     }
     public string RepositoryUrl => AppInfo.RepositoryUrl;
+
+    // The switches save through MainViewModel.SaveSettings, which says in the status bar when settings.json can't be written.
 
     public bool LaunchThroughSteam
     {
@@ -83,7 +92,7 @@ public partial class SettingsViewModel : ObservableObject
         set
         {
             Service.Settings.LaunchThroughSteam = value;
-            Service.SaveSettings();
+            _main.SaveSettings();
             OnPropertyChanged();
         }
     }
@@ -94,7 +103,7 @@ public partial class SettingsViewModel : ObservableObject
         set
         {
             Service.Settings.ShowBepInExConsole = value;
-            Service.SaveSettings();
+            _main.SaveSettings();
             OnPropertyChanged();
         }
     }
@@ -105,7 +114,7 @@ public partial class SettingsViewModel : ObservableObject
         set
         {
             Service.Settings.MinimizeGameWhenBrowsing = value;
-            Service.SaveSettings();
+            _main.SaveSettings();
             OnPropertyChanged();
         }
     }
@@ -116,7 +125,7 @@ public partial class SettingsViewModel : ObservableObject
         set
         {
             Service.Settings.AutoUpdateLauncher = value;
-            Service.SaveSettings();
+            _main.SaveSettings();
             OnPropertyChanged();
         }
     }
@@ -127,7 +136,7 @@ public partial class SettingsViewModel : ObservableObject
         set
         {
             Service.Settings.AutoUpdateMods = value;
-            Service.SaveSettings();
+            _main.SaveSettings();
             OnPropertyChanged();
         }
     }
@@ -138,18 +147,20 @@ public partial class SettingsViewModel : ObservableObject
         set
         {
             Service.Settings.GitHubUpdates = value;
-            Service.SaveSettings();
+            _main.SaveSettings();
             OnPropertyChanged();
         }
     }
 
-    /// <summary>A new launcher from GitHub (installed straight away), then updates for the installed mods.</summary>
+    /// <summary>A new launcher from GitHub (installed if you choose UPDATE), then updates for the installed mods; the status line says how both went.</summary>
     [RelayCommand]
     private async Task CheckForUpdates()
     {
         if (!_main.CheckIdle(Loc.T("Checking for updates"))) return;
         if (await _main.UpdateLauncherAsync(manual: true)) return;
-        if (await _main.UpdateModsAsync() == null) _main.SetStatus(Loc.F("{0} {1}", _main.StatusText, Loc.T("Your mods are up to date.")));
+        string launcher = _main.StatusText;
+        // Up to date only when it is: a busy launcher, Thunderstore not answering or a failed update says so instead.
+        _main.SetStatus(Loc.F("{0} {1}", launcher, await _main.UpdateModsAsync() ?? Loc.T("Your mods are up to date.")));
     }
 
     public void Refresh()
@@ -234,10 +245,10 @@ public partial class SettingsViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void OpenGameFolder() => Format.Open(Service.GameDirectory);
+    private void OpenGameFolder() => Format.OpenFolder(Service.GameDirectory);
 
     [RelayCommand]
-    private void OpenDataFolder() => Format.Open(Service.Paths.Root);
+    private void OpenDataFolder() => Format.OpenFolder(Service.Paths.Root);
 
     [RelayCommand]
     private void OpenLauncherLog() => Format.Reveal(Service.Paths.LauncherLog);
@@ -254,10 +265,10 @@ public partial class SettingsViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void OpenConfigFolder() => Format.Open(Path.Combine(Service.Paths.RuntimeBepInEx, "config"));
+    private void OpenConfigFolder() => Format.OpenFolder(Path.Combine(Service.Paths.RuntimeBepInEx, "config"));
 
     [RelayCommand]
-    private void OpenRepository() => Format.Open(AppInfo.RepositoryUrl);
+    private void OpenRepository() => Format.OpenUrl(AppInfo.RepositoryUrl);
 
     [RelayCommand]
     private void RemoveLoader()

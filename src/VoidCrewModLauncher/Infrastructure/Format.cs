@@ -30,12 +30,25 @@ public static class Format
         return Loc.T("just now");
     }
 
-    /// <summary>Opens a web page or folder with the shell. Only http(s) links and existing paths.</summary>
-    public static void Open(string? target)
+    /// <summary>
+    /// Opens a web page in the browser. Only http(s) links (see <see cref="Core.WebLink"/>): a mod's website field comes
+    /// from its author, and handing anything else to the shell could run a file.
+    /// </summary>
+    public static void OpenUrl(string? url)
     {
-        if (string.IsNullOrWhiteSpace(target)) return;
-        bool web = Uri.TryCreate(target, UriKind.Absolute, out Uri? uri) && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp);
-        if (!web && !File.Exists(target) && !Directory.Exists(target)) return;
+        if (!Core.WebLink.IsWebPage(url, out Uri? uri)) return;
+        Start(uri.AbsoluteUri);
+    }
+
+    /// <summary>Opens a folder in Explorer. Only a folder that exists: never a file, which the shell would run.</summary>
+    public static void OpenFolder(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path)) return;
+        Start(path);
+    }
+
+    private static void Start(string target)
+    {
         try
         {
             Process.Start(new ProcessStartInfo(target) { UseShellExecute = true })?.Dispose();
@@ -46,12 +59,12 @@ public static class Format
         }
     }
 
-    /// <summary>Shows a file selected in Explorer.</summary>
+    /// <summary>Shows a file selected in Explorer (or its folder, when the file isn't there).</summary>
     public static void Reveal(string path)
     {
         if (!File.Exists(path))
         {
-            Open(Directory.Exists(path) ? path : Path.GetDirectoryName(path));
+            OpenFolder(Directory.Exists(path) ? path : Path.GetDirectoryName(path));
             return;
         }
         try

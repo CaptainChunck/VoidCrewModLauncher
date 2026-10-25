@@ -9,19 +9,36 @@ namespace VoidCrewModLauncher.Infrastructure;
 /// <summary>
 /// Enough Markdown for Thunderstore READMEs: headings, lists, quotes, code blocks, bold, italics, inline code and links.
 /// Images show their alt text, HTML tags are dropped, tables become plain lines. READMEs come from anyone, so the text
-/// is capped and every pattern has a time limit; a README that runs into it shows as plain text.
+/// and the number of pieces it is drawn with are capped and every pattern has a time limit; a README that runs into a
+/// limit shows as plain text.
 /// </summary>
 public static partial class Markdown
 {
-    private static readonly Brush Text = new SolidColorBrush(Color.FromRgb(0xC8, 0xD7, 0xE6));
+    // Frozen: shared by every README shown, and an unfrozen brush would keep each element that used it alive.
+    private static readonly Brush Text = Frozen(new SolidColorBrush(Color.FromRgb(0xC8, 0xD7, 0xE6)));
     private static readonly Brush Heading = Brushes.White;
-    private static readonly Brush Accent = new SolidColorBrush(Color.FromRgb(0xF6, 0xAE, 0x3C));
-    private static readonly Brush Link = new SolidColorBrush(Color.FromRgb(0xBD, 0xE7, 0xFB));
-    private static readonly Brush CodeBack = new SolidColorBrush(Color.FromArgb(0x60, 0, 0, 0));
+    private static readonly Brush Accent = Frozen(new SolidColorBrush(Color.FromRgb(0xF6, 0xAE, 0x3C)));
+    private static readonly Brush Link = Frozen(new SolidColorBrush(Color.FromRgb(0xBD, 0xE7, 0xFB)));
+    private static readonly Brush CodeBack = Frozen(new SolidColorBrush(Color.FromArgb(0x60, 0, 0, 0)));
+    private static readonly FontFamily BodyFont = new("Segoe UI");
+    private static readonly FontFamily CodeFont = new("Consolas");
 
     /// <summary>The most of a README that is shown, and of each of its lines.</summary>
     private const int MaxLength = 256 * 1024;
     private const int MaxLineLength = 4096;
+
+    /// <summary>
+    /// The most lines of a README that are shown: the window lays out every line, and tens of thousands of short ones
+    /// took it seconds even as plain text. Real READMEs have a few hundred.
+    /// </summary>
+    private const int MaxLines = 2000;
+
+    /// <summary>
+    /// The most blocks and formatted pieces (bold, links, code, list items...) a README is drawn with. Each one costs the
+    /// window time to lay out, and lines run together into one paragraph, so a README of thousands of bold words would
+    /// freeze it (one at the limit takes about half a second). Real READMEs use a few hundred.
+    /// </summary>
+    private const int MaxElements = 4000;
 
     /// <summary>The time limit of each pattern match.</summary>
     private const int MatchTimeoutMs = 250;
@@ -35,32 +52,69 @@ public static partial class Markdown
             return empty;
         }
         if (markdown.Length > MaxLength) markdown = markdown[..MaxLength];
+        markdown = FirstLines(markdown, MaxLines);
         try
         {
             return Render(markdown);
         }
-        catch (RegexMatchTimeoutException)
+        catch (Exception e) when (e is RegexMatchTimeoutException or TooManyPartsException)
         {
-            AppLog.Warn("A README took too long to read; it shows as plain text.");
+            AppLog.Warn(e is TooManyPartsException
+                ? "A README has too many parts to draw; it shows as plain text."
+                : "A README took too long to read; it shows as plain text.");
             FlowDocument plain = NewDocument();
             plain.Blocks.Add(new Paragraph(new Run(markdown.Replace("\r\n", "\n"))));
             return plain;
         }
     }
 
+    private static Brush Frozen(Brush brush)
+    {
+        brush.Freeze();
+        return brush;
+    }
+
+    /// <summary>The text up to its <paramref name="count"/>th line break (all of it when it has fewer lines).</summary>
+    private static string FirstLines(string text, int count)
+    {
+        int end = -1;
+        for (int line = 0; line < count; line++)
+        {
+            end = text.IndexOf('\n', end + 1);
+            if (end < 0) return text;
+        }
+        return text[..end];
+    }
+
     private static FlowDocument NewDocument() => new()
     {
-        FontFamily = new FontFamily("Segoe UI"),
+        FontFamily = BodyFont,
         FontSize = 14,
         Foreground = Text,
         PagePadding = new Thickness(0),
         TextAlignment = TextAlignment.Left,
     };
 
+    /// <summary>Thrown when a README needs more than <see cref="MaxElements"/> pieces.</summary>
+    private sealed class TooManyPartsException : Exception;
+
+    /// <summary>Counts the pieces a README is drawn with.</summary>
+    private sealed class Parts
+    {
+        private int _left = MaxElements;
+
+        public void Add(int count = 1)
+        {
+            _left -= count;
+            if (_left < 0) throw new TooManyPartsException();
+        }
+    }
+
     private static FlowDocument Render(string markdown)
     {
         FlowDocument document = NewDocument();
         string[] lines = StripComments(markdown.Replace("\r\n", "\n")).Split('\n');
+        var parts = new Parts();
         List? list = null;
         Paragraph? lastItem = null;
         var paragraph = new List<string>();
@@ -71,8 +125,9 @@ public static partial class Markdown
         void FlushParagraph()
         {
             if (paragraph.Count == 0) return;
+            parts.Add();
             var block = new Paragraph { Margin = new Thickness(0, 0, 0, 10), LineHeight = 20 };
-            AddInlines(block.Inlines, string.Join(" ", paragraph));
+            AddInlines(block.Inlines, string.Join(" ", paragraph), parts);
             document.Blocks.Add(block);
             paragraph.Clear();
         }
@@ -80,6 +135,7 @@ public static partial class Markdown
         void FlushQuote()
         {
             if (quote.Count == 0) return;
+            parts.Add();
             var block = new Paragraph
             {
                 BorderBrush = Accent,
@@ -87,16 +143,17 @@ public static partial class Markdown
                 Padding = new Thickness(10, 2, 0, 2),
                 Margin = new Thickness(0, 0, 0, 10),
             };
-            AddInlines(block.Inlines, string.Join(" ", quote));
+            AddInlines(block.Inlines, string.Join(" ", quote), parts);
             document.Blocks.Add(block);
             quote.Clear();
         }
 
         void FlushCode()
         {
+            parts.Add();
             document.Blocks.Add(new Paragraph(new Run(string.Join("\n", code)))
             {
-                FontFamily = new FontFamily("Consolas"),
+                FontFamily = CodeFont,
                 FontSize = 12.5,
                 Background = CodeBack,
                 Padding = new Thickness(8),
@@ -145,6 +202,7 @@ public static partial class Markdown
             if (ReadHeading(trimmed) is { } heading)
             {
                 EndBlocks();
+                parts.Add();
                 int level = heading.Level;
                 var block = new Paragraph
                 {
@@ -153,7 +211,7 @@ public static partial class Markdown
                     Foreground = level <= 2 ? Heading : Accent,
                     Margin = new Thickness(0, level <= 2 ? 10 : 6, 0, 6),
                 };
-                AddInlines(block.Inlines, heading.Text);
+                AddInlines(block.Inlines, heading.Text, parts);
                 document.Blocks.Add(block);
                 continue;
             }
@@ -165,11 +223,13 @@ public static partial class Markdown
                 FlushQuote();
                 if (list == null)
                 {
+                    parts.Add();
                     list = new List { MarkerStyle = TextMarkerStyle.Disc, Margin = new Thickness(0, 0, 0, 10), Padding = new Thickness(18, 0, 0, 0) };
                     document.Blocks.Add(list);
                 }
+                parts.Add();
                 lastItem = new Paragraph { Margin = new Thickness(0, 0, 0, 3) };
-                AddInlines(lastItem.Inlines, StripHtml(bullet.Groups[2].Value));
+                AddInlines(lastItem.Inlines, StripHtml(bullet.Groups[2].Value), parts);
                 var listItem = new ListItem(lastItem);
                 if (bullet.Groups[1].Length >= 2) listItem.Margin = new Thickness(16, 0, 0, 0);
                 list.ListItems.Add(listItem);
@@ -188,7 +248,7 @@ public static partial class Markdown
             // A line right under a list item belongs to that item (Markdown's lazy continuation).
             if (lastItem != null)
             {
-                AddInlines(lastItem.Inlines, " " + trimmed);
+                AddInlines(lastItem.Inlines, " " + trimmed, parts);
                 continue;
             }
 
@@ -243,11 +303,13 @@ public static partial class Markdown
         return kept.ToString();
     }
 
-    private static void AddInlines(InlineCollection inlines, string text)
+    private static void AddInlines(InlineCollection inlines, string text, Parts parts)
     {
         int position = 0;
         foreach (Match match in InlineToken().Matches(text))
         {
+            // The text before it and the piece itself (a link or bold text is two elements, counted as one).
+            parts.Add(match.Index > position ? 2 : 1);
             if (match.Index > position) inlines.Add(new Run(text[position..match.Index]));
             if (match.Groups["img"].Success)
             {
@@ -258,10 +320,10 @@ public static partial class Markdown
             {
                 string url = match.Groups["url"].Value;
                 var link = new Hyperlink(new Run(match.Groups["linktext"].Value)) { Foreground = Link, Cursor = System.Windows.Input.Cursors.Hand };
-                if (Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp))
+                if (WebLink.IsWebPage(url, out _))
                 {
                     link.ToolTip = url;
-                    link.Click += (_, _) => Format.Open(url);
+                    link.Click += (_, _) => Format.OpenUrl(url);
                 }
                 inlines.Add(link);
             }
@@ -275,11 +337,15 @@ public static partial class Markdown
             }
             else if (match.Groups["code"].Success)
             {
-                inlines.Add(new Run(match.Groups["codetext"].Value) { FontFamily = new FontFamily("Consolas"), Background = CodeBack, Foreground = Brushes.White });
+                inlines.Add(new Run(match.Groups["codetext"].Value) { FontFamily = CodeFont, Background = CodeBack, Foreground = Brushes.White });
             }
             position = match.Index + match.Length;
         }
-        if (position < text.Length) inlines.Add(new Run(text[position..]));
+        if (position < text.Length)
+        {
+            parts.Add();
+            inlines.Add(new Run(text[position..]));
+        }
     }
 
     private static string StripHtml(string text) => HtmlTag().Replace(text, "");

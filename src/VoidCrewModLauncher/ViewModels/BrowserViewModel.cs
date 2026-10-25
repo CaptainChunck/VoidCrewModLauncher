@@ -70,7 +70,7 @@ public partial class BrowserViewModel : ObservableObject
         set
         {
             _main.Service.Settings.MinimizeGameWhenBrowsing = value;
-            _main.Service.SaveSettings();
+            _main.SaveSettings();
             OnPropertyChanged();
         }
     }
@@ -189,22 +189,41 @@ public partial class BrowserViewModel : ObservableObject
         RefreshLobbies();
     }
 
-    /// <summary>Rebuilds the rows (mod status depends on the library too, so this also runs after installs).</summary>
+    /// <summary>
+    /// Draws the rows again (mod status depends on the library too, so this also runs after installs). Rows that show the
+    /// same as before stay as they are, changed ones are replaced and the sorted list puts them in place, so the list keeps
+    /// its selection, focus and scroll position while new room lists come in every second.
+    /// </summary>
     public void RefreshLobbies()
     {
         if (_rooms == null) return;
         string? selectedId = Selected?.Id;
         PackageIndex index = _main.Service.Index;
-        _lobbies.Clear();
+        var current = new Dictionary<string, LobbyViewModel>(StringComparer.Ordinal);
+        foreach (LobbyViewModel row in _lobbies) current.TryAdd(row.Id ?? "", row);
+        var rows = new List<LobbyViewModel>();
+        var wanted = new HashSet<LobbyViewModel>();
         foreach (RoomDto room in _rooms.Rooms ?? new List<RoomDto>())
         {
             Lobby lobby = LobbyReader.Read(room, _rooms.Region, index);
-            _lobbies.Add(new LobbyViewModel(lobby, _main.Service.Planner.Plan(lobby)));
+            var row = new LobbyViewModel(lobby, _main.Service.Planner.Plan(lobby));
+            if (current.TryGetValue(row.Id ?? "", out LobbyViewModel? old) && old.Key == row.Key && !wanted.Contains(old)) row = old;
+            rows.Add(row);
+            wanted.Add(row);
+        }
+        for (int i = _lobbies.Count - 1; i >= 0; i--)
+        {
+            if (!wanted.Contains(_lobbies[i])) _lobbies.RemoveAt(i);
+        }
+        var shown = new HashSet<LobbyViewModel>(_lobbies);
+        foreach (LobbyViewModel row in rows)
+        {
+            if (!shown.Contains(row)) _lobbies.Add(row);
         }
         LobbyCount = _lobbies.Count;
-        LobbiesView.Refresh();
         ShownCount = LobbiesView.Cast<object>().Count();
-        Selected = _lobbies.FirstOrDefault(l => l.Id == selectedId);
+        // A selected row that changed was replaced: select its new row.
+        if (selectedId != null && (Selected == null || !wanted.Contains(Selected))) Selected = _lobbies.FirstOrDefault(l => l.Id == selectedId);
         RaiseOverlay();
         LookUpMissingVersions();
     }
@@ -250,30 +269,39 @@ public partial class BrowserViewModel : ObservableObject
         return true;
     }
 
+    // The search text isn't kept between sessions, so typing it saves nothing; the filter switches are saved when they change.
     partial void OnSearchChanged(string value) => ApplyFilter();
-    partial void OnHideFullChanged(bool value) => ApplyFilter();
-    partial void OnOnlyInHubChanged(bool value) => ApplyFilter();
+    partial void OnHideFullChanged(bool value) => SaveFiltersAndApply();
+    partial void OnOnlyInHubChanged(bool value) => SaveFiltersAndApply();
 
     partial void OnHideVanillaChanged(bool value)
     {
         if (value) HideModded = false;
-        ApplyFilter();
+        SaveFiltersAndApply();
     }
 
     partial void OnHideModdedChanged(bool value)
     {
         if (value) HideVanilla = false;
+        SaveFiltersAndApply();
+    }
+
+    private void SaveFiltersAndApply()
+    {
+        BrowserSettings settings = _main.Service.Settings.Browser;
+        if (settings.HideFull != HideFull || settings.HideVanilla != HideVanilla || settings.HideModded != HideModded || settings.OnlyInHub != OnlyInHub)
+        {
+            settings.HideFull = HideFull;
+            settings.HideVanilla = HideVanilla;
+            settings.HideModded = HideModded;
+            settings.OnlyInHub = OnlyInHub;
+            _main.SaveSettings();
+        }
         ApplyFilter();
     }
 
     private void ApplyFilter()
     {
-        BrowserSettings settings = _main.Service.Settings.Browser;
-        settings.HideFull = HideFull;
-        settings.HideVanilla = HideVanilla;
-        settings.HideModded = HideModded;
-        settings.OnlyInHub = OnlyInHub;
-        _main.Service.SaveSettings();
         LobbiesView.Refresh();
         ShownCount = LobbiesView.Cast<object>().Count();
         OnPropertyChanged(nameof(Banner));
@@ -335,9 +363,11 @@ public partial class BrowserViewModel : ObservableObject
             _main.SetStatus(Loc.T("Ready."));
         }
 
-        // Re-plan against the current library, then let the player check it.
+        // Re-plan against the current library, then let the player check it. Restarting the game from a hub or a mission
+        // leaves that game at once (with the host, the crew's mission ends): the dialog says so, as HOST LOBBY's does.
         JoinPlan plan = service.Planner.Plan(current);
-        if (!_main.Dialogs.ConfirmJoin(plan, service.Planner.Resolve, j => !service.CanJoinWithoutRestart(j), _main.GameRunning)) return;
+        bool inGame = _main.GameState is GameState.Hub or GameState.Mission;
+        if (!_main.Dialogs.ConfirmJoin(plan, service.Planner.Resolve, j => !service.CanJoinWithoutRestart(j), _main.GameRunning, inGame)) return;
         ResolvedJoin join = service.Planner.Resolve(plan);
         await JoinWith(current, join);
     }
@@ -389,68 +419,22 @@ public partial class BrowserViewModel : ObservableObject
         if (left.Reason != "mods" || !IsLastJoin(left.RoomId) || _lastJoin is not { } last) return;
         (Lobby lobby, ResolvedJoin join) = last;
         _lastJoin = null;
-        PackageIndex index = _main.Service.Index;
 
-        var found = new List<(string Name, TsPackage Package)>();
-        var notFound = new List<string>();
-        foreach (ModNameDto missing in left.MissingMods ?? new List<ModNameDto>())
-        {
-            string name = string.IsNullOrEmpty(missing.DisplayName) ? missing.Name : missing.DisplayName;
-            TsPackage? package = index.FindByName(missing.DisplayName) ?? index.FindByName(StripVersion(missing.Name));
-            if (package != null && join.Mods.All(m => !string.Equals(m.Id, package.FullName, StringComparison.OrdinalIgnoreCase))) found.Add((name, package));
-            else notFound.Add(name);
-        }
-        var extra = new List<RuntimeMod>();
-        foreach (ModNameDto invalid in left.InvalidMods ?? new List<ModNameDto>())
-        {
-            string simple = PackageIndex.Simplify(StripVersion(string.IsNullOrEmpty(invalid.DisplayName) ? invalid.Name : invalid.DisplayName));
-            extra.AddRange(join.Mods.Where(m => PackageIndex.Simplify(m.Name) == simple || PackageIndex.Simplify(m.Id).EndsWith(simple, StringComparison.Ordinal)));
-        }
-        // The game often names what's missing by a mod's assets (a mission, an item) rather than the mod. The host's own
-        // mods this join left out (listed as only the host's) are then the likely owners: a mod the game requires that the
-        // host didn't list for everyone (hosts before launcher 0.8.1 couldn't tell).
-        List<LobbyMod> leftOut = notFound.Count == 0 ? new List<LobbyMod>()
-            : lobby.Mods.Where(m => m is { Downloadable: true, JoinerNeeds: false, Need: not ModNeed.ClientOnly }
-                                    && (m.PackageVersion ?? m.Package!.Latest) != null
-                                    && join.Mods.All(r => !string.Equals(r.Id, m.Package!.FullName, StringComparison.OrdinalIgnoreCase))).ToList();
-
+        // Which of the named mods to add, which of the join's to leave out (Core's RejoinPlan, tested there).
+        RejoinPlan fix = RejoinPlan.For(lobby, join, left.MissingMods, left.InvalidMods, _main.Service.Index);
         var message = new System.Text.StringBuilder(Loc.F("{0} turned Void Crew away because the mods don't match.", lobby.Name)).Append('\n');
-        if (found.Count > 0) message.Append('\n').Append(Loc.T("It needs (found on Thunderstore):")).Append('\n').AppendJoin("\n", found.Select(f => "  • " + Loc.F("{0} → {1} by {2}", f.Name, f.Package.DisplayName, f.Package.Author))).Append('\n');
-        if (notFound.Count > 0) message.Append('\n').Append(Loc.T("It needs (not found on Thunderstore):")).Append('\n').AppendJoin("\n", notFound.Select(n => "  • " + n)).Append('\n');
-        if (leftOut.Count > 0) message.Append('\n').Append(Loc.T("Also loading the host's other mods:")).Append('\n').AppendJoin("\n", leftOut.Select(m => "  • " + m.DisplayName)).Append('\n');
-        if (extra.Count > 0) message.Append('\n').Append(Loc.T("It doesn't allow:")).Append('\n').AppendJoin("\n", extra.Select(m => "  • " + m.Name.Replace('_', ' '))).Append('\n');
+        if (fix.Found.Count > 0) message.Append('\n').Append(Loc.T("It needs (found on Thunderstore):")).Append('\n').AppendJoin("\n", fix.Found.Select(f => "  • " + Loc.F("{0} → {1} by {2}", f.Name, f.Package.DisplayName, f.Package.Author))).Append('\n');
+        if (fix.AlreadyLoaded.Count > 0) message.Append('\n').Append(Loc.T("It needs (already loaded, maybe at another version):")).Append('\n').AppendJoin("\n", fix.AlreadyLoaded.Select(f => "  • " + Loc.F("{0} → {1} by {2}", f.Name, f.Package.DisplayName, f.Package.Author))).Append('\n');
+        if (fix.NotFound.Count > 0) message.Append('\n').Append(Loc.T("It needs (not found on Thunderstore):")).Append('\n').AppendJoin("\n", fix.NotFound.Select(n => "  • " + n)).Append('\n');
+        if (fix.HostsOtherMods.Count > 0) message.Append('\n').Append(Loc.T("Also loading the host's other mods:")).Append('\n').AppendJoin("\n", fix.HostsOtherMods.Select(m => "  • " + m.DisplayName)).Append('\n');
+        if (fix.Disallowed.Count > 0) message.Append('\n').Append(Loc.T("It doesn't allow:")).Append('\n').AppendJoin("\n", fix.Disallowed.Select(m => "  • " + m.Name.Replace('_', ' '))).Append('\n');
 
-        if (found.Count == 0 && extra.Count == 0 && leftOut.Count == 0)
+        if (!fix.CanFix)
         {
             _main.Dialogs.Error(Loc.T("Mods don't match"), message.ToString());
             return;
         }
         if (!_main.Dialogs.Confirm(Loc.T("Mods don't match"), Loc.F("{0}\nFix the mods and join again?", message), Loc.T("FIX AND REJOIN"), Loc.T("NOT NOW"))) return;
-
-        var fixedJoin = new ResolvedJoin();
-        fixedJoin.Mods.AddRange(join.Mods.Except(extra));
-        var roots = found.Select(f => (f.Package, f.Package.Latest!)).ToList();
-        var pinned = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (LobbyMod mod in leftOut)
-        {
-            TsVersion version = (mod.PackageVersion ?? mod.Package!.Latest)!;
-            roots.Add((mod.Package!, version));
-            pinned[mod.Package!.FullName] = version.VersionNumber;
-        }
-        foreach ((TsPackage package, TsVersion version) in _main.Service.Mods.Resolve(roots, pinned))
-        {
-            if (fixedJoin.Mods.Any(m => string.Equals(m.Id, package.FullName, StringComparison.OrdinalIgnoreCase))) continue;
-            string folder = _main.Service.Store.VersionDirectory(package.FullName, version.VersionNumber);
-            fixedJoin.Mods.Add(new RuntimeMod(package.FullName, package.Name, version.VersionNumber, folder, false, ModNeed.Everyone));
-            if (!_main.Service.Store.Has(package.FullName, version.VersionNumber)) fixedJoin.Downloads.Add((package, version));
-        }
-        _ = JoinWith(lobby, fixedJoin, restart: extra.Count > 0);
-    }
-
-    private static string StripVersion(string? name)
-    {
-        if (string.IsNullOrEmpty(name)) return "";
-        string[] words = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        return string.Join(' ', words.Where(w => !(char.IsDigit(w[0]) && w.Contains('.')) && !w.StartsWith('(')));
+        _ = JoinWith(lobby, fix.FixedJoin(join, _main.Service.Mods), restart: fix.Disallowed.Count > 0);
     }
 }

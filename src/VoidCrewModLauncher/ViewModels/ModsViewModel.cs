@@ -71,6 +71,9 @@ public partial class ModsViewModel : ObservableObject
         {
             _installed.Remove(gone);
         }
+        // Rows added or removed take their place in the sorted list by themselves; the list is sorted and searched again
+        // only when a row it has moves (sorting it again redraws every row, and the row with the keyboard focus loses it).
+        bool moved = false;
         foreach (InstalledMod mod in mods)
         {
             InstalledModViewModel? row = _installed.FirstOrDefault(vm => string.Equals(vm.Id, mod.Id, StringComparison.OrdinalIgnoreCase));
@@ -82,7 +85,7 @@ public partial class ModsViewModel : ObservableObject
             }
             else
             {
-                row.Refresh(mod);
+                moved |= row.Refresh(mod);
             }
             row.UpdateVersion = updates.TryGetValue(mod.Id, out string? latest) ? latest : null;
         }
@@ -92,7 +95,7 @@ public partial class ModsViewModel : ObservableObject
         string? bepInEx = service.Store.Versions(PackageIndex.BepInExPackId).OrderByDescending(v => v, VersionNumber.Comparer).FirstOrDefault();
         BepInExText = bepInEx == null ? Loc.T("BepInEx: not downloaded yet") : $"BepInEx {bepInEx}";
         OnPropertyChanged(nameof(UpdateAllText));
-        InstalledView.Refresh();
+        if (moved) InstalledView.Refresh();
         foreach (PackageViewModel package in _online) package.Installed = service.Library.Find(package.Id);
         UpdateAllCommand.NotifyCanExecuteChanged();
     }
@@ -172,7 +175,8 @@ public partial class ModsViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanUpdateAll))]
     private async Task UpdateAll()
     {
-        if (await _main.UpdateModsAsync() == null) _main.SetStatus(Loc.T("Your mods are up to date."));
+        // Up to date only when it is: a busy launcher or a failed update says so instead.
+        _main.SetStatus(await _main.UpdateModsAsync() ?? Loc.T("Your mods are up to date."));
     }
 
     [RelayCommand]
@@ -205,13 +209,14 @@ public partial class ModsViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void OpenModFolder(InstalledModViewModel row) => Format.Open(_main.Service.Store.VersionDirectory(row.Id, row.Mod.Version));
+    private void OpenModFolder(InstalledModViewModel row) => Format.OpenFolder(_main.Service.Store.VersionDirectory(row.Id, row.Mod.Version));
 
+    /// <summary>The mod's Thunderstore page, else the website its files name (a web page only: a local zip's manifest can say anything).</summary>
     [RelayCommand]
     private void OpenModPage(InstalledModViewModel row)
     {
         TsPackage? package = _main.Service.Index.Find(row.Id);
-        Format.Open(package?.PackageUrl ?? row.Mod.WebsiteUrl);
+        Format.OpenUrl(package?.PackageUrl ?? row.Mod.WebsiteUrl);
     }
 
     [RelayCommand]
@@ -287,21 +292,31 @@ public partial class ModsViewModel : ObservableObject
 
     // ---------------------------------------------------------------- BROWSE
 
+    /// <summary>Set while the list is filled again: the category list changing then doesn't filter it each time.</summary>
+    private bool _fillingOnline;
+
     public void RefreshOnline()
     {
         LauncherService service = _main.Service;
         string? selected = SelectedPackage?.Id;
-        _online.Clear();
-        foreach (TsPackage package in service.Index.Mods)
-        {
-            _online.Add(new PackageViewModel(package, service.Library.Find(package.FullName)));
-        }
         string current = Category;
-        var categories = service.Index.Mods.SelectMany(p => p.Categories).Where(c => c != "Mods").Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(c => c).ToList();
-        Categories.Clear();
-        Categories.Add(AllCategories);
-        foreach (string category in categories) Categories.Add(category);
-        Category = Categories.Contains(current) ? current : AllCategories;
+        _fillingOnline = true;
+        try
+        {
+            _online.Clear();
+            foreach (TsPackage package in service.Index.Mods)
+            {
+                _online.Add(new PackageViewModel(package, service.Library.Find(package.FullName)));
+            }
+            var categories = service.Index.Mods.SelectMany(p => p.Categories).Where(c => c != "Mods").Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(c => c).ToList();
+            // In place: the chosen category stays in the list (taken out, the list would choose nothing and show no mods).
+            Categories.SyncTo(new[] { AllCategories }.Concat(categories).ToList(), StringComparer.Ordinal);
+            Category = Categories.Contains(current) ? current : AllCategories;
+        }
+        finally
+        {
+            _fillingOnline = false;
+        }
         OnlineView.Refresh();
         SelectedPackage = _online.FirstOrDefault(p => p.Id == selected);
     }
@@ -315,7 +330,11 @@ public partial class ModsViewModel : ObservableObject
     }
 
     partial void OnOnlineSearchChanged(string value) => OnlineView.Refresh();
-    partial void OnCategoryChanged(string value) => OnlineView.Refresh();
+
+    partial void OnCategoryChanged(string value)
+    {
+        if (!_fillingOnline) OnlineView.Refresh();
+    }
     partial void OnShowDeprecatedChanged(bool value) => OnlineView.Refresh();
     partial void OnSortChanged(string value) => ApplySort();
 
@@ -398,10 +417,10 @@ public partial class ModsViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void OpenPackagePage(PackageViewModel package) => Format.Open(package.Package.PackageUrl);
+    private void OpenPackagePage(PackageViewModel package) => Format.OpenUrl(package.Package.PackageUrl);
 
     [RelayCommand]
-    private void OpenPackageWebsite(PackageViewModel package) => Format.Open(package.Package.Latest?.WebsiteUrl);
+    private void OpenPackageWebsite(PackageViewModel package) => Format.OpenUrl(package.Package.Latest?.WebsiteUrl);
 
     [RelayCommand]
     private async Task RefreshOnlineList()

@@ -19,7 +19,13 @@ public partial class InstalledModViewModel : ObservableObject
         _loading = true;
         isEnabled = mod.Enabled;
         _loading = false;
+        _place = PlaceOf(mod);
     }
+
+    /// <summary>What the list sorts and searches the row by, as last drawn (the library changes mods in place).</summary>
+    private string _place;
+
+    private string PlaceOf(InstalledMod mod) => string.Join("\u001f", mod.InstalledAsDependency, Name, mod.Author, Description);
 
     public InstalledMod Mod { get; private set; }
 
@@ -54,13 +60,18 @@ public partial class InstalledModViewModel : ObservableObject
     public bool JoinKeep => Mod.WhenJoining == JoinBehaviour.Keep;
     public bool JoinOnlyIfLobby => Mod.WhenJoining == JoinBehaviour.OnlyIfLobbyHasIt;
 
-    public void Refresh(InstalledMod mod)
+    /// <summary>Shows <paramref name="mod"/>'s details now; true when that moves the row in the sorted, searched list.</summary>
+    public bool Refresh(InstalledMod mod)
     {
         Mod = mod;
         _loading = true;
         IsEnabled = mod.Enabled;
         _loading = false;
         OnPropertyChanged(string.Empty);
+        string place = PlaceOf(mod);
+        bool moved = place != _place;
+        _place = place;
+        return moved;
     }
 
     partial void OnIsEnabledChanged(bool value)

@@ -13,24 +13,18 @@
     <Color x:Key="OrangeColor">#F6AE3C</Color>
     <Color x:Key="LightOrangeColor">#F6C576</Color>
     <Color x:Key="LightGreyColor">#696A6D</Color>
-    <Color x:Key="DarkGreyColor">#303030</Color>
     <Color x:Key="LightBlueColor">#BDE7FB</Color>
     <Color x:Key="BlueColor">#277EC1</Color>
-    <Color x:Key="TabBlueColor">#307BA6</Color>
     <Color x:Key="GreenColor">#47D35A</Color>
     <Color x:Key="RedColor">#EC1E24</Color>
-    <Color x:Key="DecoBrownColor">#5E544A</Color>
 
     <SolidColorBrush x:Key="Orange" Color="{StaticResource OrangeColor}" />
     <SolidColorBrush x:Key="LightOrange" Color="{StaticResource LightOrangeColor}" />
     <SolidColorBrush x:Key="LightGrey" Color="{StaticResource LightGreyColor}" />
-    <SolidColorBrush x:Key="DarkGrey" Color="{StaticResource DarkGreyColor}" />
     <SolidColorBrush x:Key="LightBlue" Color="{StaticResource LightBlueColor}" />
     <SolidColorBrush x:Key="Blue" Color="{StaticResource BlueColor}" />
-    <SolidColorBrush x:Key="TabBlue" Color="{StaticResource TabBlueColor}" />
     <SolidColorBrush x:Key="Green" Color="{StaticResource GreenColor}" />
     <SolidColorBrush x:Key="Red" Color="{StaticResource RedColor}" />
-    <SolidColorBrush x:Key="DecoBrown" Color="{StaticResource DecoBrownColor}" />
     <SolidColorBrush x:Key="White" Color="White" />
     <SolidColorBrush x:Key="Black" Color="Black" />
     <SolidColorBrush x:Key="TextSecondary" Color="#C9CFD6" />
@@ -40,7 +34,6 @@
     <!-- List rows: dark and see-through, with a hairline between them (the matchmaking list). -->
     <SolidColorBrush x:Key="Row" Color="#B0121820" />
     <SolidColorBrush x:Key="RowLine" Color="#2C333C" />
-    <SolidColorBrush x:Key="RowDim" Color="#80101419" />
     <SolidColorBrush x:Key="HeaderBand" Color="#E626292D" />
     <!-- The main menu's panel: charcoal with a steel outline. -->
     <SolidColorBrush x:Key="Popup" Color="#F2222528" />
@@ -49,9 +42,6 @@
     <SolidColorBrush x:Key="FieldLine" Color="#646A71" />
     <SolidColorBrush x:Key="Line" Color="#7D848B" />
     <SolidColorBrush x:Key="Meander" Color="#545960" />
-    <SolidColorBrush x:Key="Terminal" Color="Transparent" />
-    <SolidColorBrush x:Key="TerminalEdge" Color="Transparent" />
-    <SolidColorBrush x:Key="TitleBar" Color="Transparent" />
 
     <!-- The logo's gold. -->
     <LinearGradientBrush x:Key="Gold" StartPoint="0,0" EndPoint="0,1">

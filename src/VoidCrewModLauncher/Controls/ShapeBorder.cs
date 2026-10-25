@@ -24,7 +24,7 @@ public enum BorderShape
     /// <summary>Both bottom corners cut, like the main menu's panel and its news cards.</summary>
     ChamferBottom,
 
-    /// <summary>Both top corners cut and an open bottom, like the settings menu's tabs.</summary>
+    /// <summary>Both top corners cut, like the settings menu's tabs (the outline is closed along the bottom too).</summary>
     ChamferTop,
 
     /// <summary>A square stood on its point, like the matchmaking filters' check boxes.</summary>

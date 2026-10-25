@@ -1,3 +1,5 @@
+using System.Text.Json;
+using VoidCrewModLauncher.Core;
 using VoidCrewModLauncher.Core.Lobbies;
 using VoidCrewModLauncher.Core.Mods;
 using VoidCrewModLauncher.Protocol;
@@ -43,7 +45,16 @@ public sealed class LobbyViewModel
             LobbyReadiness.Missing => Loc.F("{0} MISSING", missing),
             _ => Loc.T("UNKNOWN"),
         };
+        // The room as the game sent it, and what the row and its details show of its mods (the rest comes from the room).
+        Key = string.Join("\u001f", JsonSerializer.Serialize(lobby.Room, JsonFiles.Protocol), lobby.Region, ReadyText, ModsSummary, ModsTooltip,
+            KeptText, TurnedOffText, Warnings, string.Join("\u001e", Mods.Select(m => string.Join("\u001d", m.Name, m.Version, m.Author, m.Needed, m.NeedText, m.StatusText, m.Note))));
     }
+
+    /// <summary>
+    /// Everything this row shows, with the room as the game sent it: when the list is drawn again (every new room list,
+    /// every install), a row whose key hasn't changed stays as it is, so the list keeps its selection and focus.
+    /// </summary>
+    public string Key { get; }
 
     public Lobby Lobby { get; }
     public JoinPlan Plan { get; }
@@ -61,10 +72,8 @@ public sealed class LobbyViewModel
     public string Sector => string.IsNullOrEmpty(Room.System) || Room.System == "--" ? "—" : Room.System;
     public string Region => MainViewModel.RegionName(Lobby.Region);
     public string Rank => Room.AverageRank > 0 ? Room.AverageRank.ToString() : "—";
-    public string Roles => Room.Roles is { Count: > 0 } roles ? string.Join(", ", roles) : "—";
     public string Mutators => Room.Mutators is { Count: > 0 } mutators ? string.Join(", ", mutators) : Loc.T("None");
     public bool CrossPlay => Room.CrossPlay;
-    public string Platform => Room.SamePlatform ? Room.Platform ?? "" : Loc.F("{0} (crossplay)", Room.Platform);
 
     /// <summary>The game's own tag.</summary>
     public string ModdingTag => Room.Modding switch { "session" => "MOD_SESSION", "local" => "MOD_LOCAL", _ => "" };

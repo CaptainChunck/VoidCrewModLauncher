@@ -44,9 +44,10 @@ public sealed class Dialogs
         Ask(title, message, new DialogButton(yes, ButtonKind.Primary), new DialogButton(no ?? Loc.T("CANCEL"))) == 0;
 
     /// <summary>The join dialog: what the lobby needs and what changes for this game. True to go ahead.</summary>
-    public bool ConfirmJoin(JoinPlan plan, Func<JoinPlan, ResolvedJoin> resolve, Func<ResolvedJoin, bool> needsRestart, bool gameRunning)
+    /// <param name="inGame">The game is in a hub or on a mission, which a restart leaves at once.</param>
+    public bool ConfirmJoin(JoinPlan plan, Func<JoinPlan, ResolvedJoin> resolve, Func<ResolvedJoin, bool> needsRestart, bool gameRunning, bool inGame = false)
     {
-        var window = new JoinWindow(plan, resolve, needsRestart, gameRunning) { Owner = OwnerWindow() };
+        var window = new JoinWindow(plan, resolve, needsRestart, gameRunning, inGame) { Owner = OwnerWindow() };
         return window.ShowDialog() == true;
     }
 

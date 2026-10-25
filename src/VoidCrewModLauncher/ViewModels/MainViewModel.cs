@@ -60,12 +60,7 @@ public partial class MainViewModel : ObservableObject
             OnPropertyChanged(nameof(ThunderstoreText));
         });
         service.PackagesFreshened += ids => OnUi(() => OnPackagesFreshened(ids));
-        service.Library.Changed += () => OnUi(() =>
-        {
-            Mods.RefreshInstalled();
-            Host.RefreshMods();
-            Browser.RefreshLobbies();
-        });
+        service.Library.Changed += () => OnUi(OnLibraryChanged);
         service.Bridge.Connected += hello => OnUi(() => OnGameConnected(hello));
         service.Bridge.Disconnected += () => OnUi(UpdateGameState);
         service.Bridge.StateChanged += state => OnUi(() =>
@@ -87,6 +82,42 @@ public partial class MainViewModel : ObservableObject
         _timer.Start();
         _playingTimer = new DispatcherTimer(PlayingCheckInterval, DispatcherPriority.Background, async (_, _) => await CheckWhilePlayingAsync(), _dispatcher);
         _playingTimer.Start();
+
+        // A running game's bridge can connect between the launcher starting its server and the subscriptions above, and
+        // then says nothing new until something changes: start from what it has already said (after any of its events
+        // that are already on their way here; going over them twice changes nothing).
+        _dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+        {
+            if (!service.Bridge.IsConnected) return;
+            if (service.Bridge.Hello is { } hello) OnGameConnected(hello);
+            if (service.Bridge.State is { } state) Browser.OnState(state);
+            if (service.Bridge.Rooms is { } rooms) Browser.OnRooms(rooms);
+            UpdateGameState();
+            Browser.NotifyCommands();
+        });
+    }
+
+    /// <summary>Set while the lists wait to be drawn again after a library change.</summary>
+    private DispatcherTimer? _libraryTimer;
+
+    /// <summary>
+    /// The library changed: the INSTALLED and HOST rows and the lobbies' mod status are drawn again a moment later, once
+    /// for every change meanwhile (installing or updating a mod changes it several times, each saved on its own).
+    /// </summary>
+    private void OnLibraryChanged()
+    {
+        if (_libraryTimer == null)
+        {
+            _libraryTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher) { Interval = TimeSpan.FromMilliseconds(150) };
+            _libraryTimer.Tick += (_, _) =>
+            {
+                _libraryTimer?.Stop();
+                Mods.RefreshInstalled();
+                Host.RefreshMods();
+                Browser.RefreshLobbies();
+            };
+        }
+        if (!_libraryTimer.IsEnabled) _libraryTimer.Start();
     }
 
     /// <summary>How often the mods of a running game are checked for updates.</summary>
@@ -125,8 +156,19 @@ public partial class MainViewModel : ObservableObject
     public LauncherService Service { get; }
     public Dialogs Dialogs { get; }
 
-    /// <summary>The launcher's own command-line options, kept when it restarts after a self-update.</summary>
+    /// <summary>The launcher's own command-line options (--portable, --data-dir), kept when it restarts itself.</summary>
     public IReadOnlyList<string> LauncherArguments { get; init; } = Array.Empty<string>();
+
+    /// <summary>The voidcrewmod:// link the launcher was started with, until start-up gets to it.</summary>
+    private string? _startLink;
+
+    /// <summary>
+    /// What the launcher restarts itself with (a self-update, a new language): its options, and the link it was started
+    /// with while that still waits, for the new launcher to handle. A link already handled isn't passed on: it would ask
+    /// to install its mod again.
+    /// </summary>
+    public IReadOnlyList<string> RestartArguments =>
+        _startLink == null ? LauncherArguments : LauncherArguments.Concat(new[] { App.LinkArgument, _startLink }).ToList();
     public Icons Icons { get; }
     public BrowserViewModel Browser { get; }
     public ModsViewModel Mods { get; }
@@ -201,6 +243,9 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>The launch for which the launcher was put in front of the game's main menu.</summary>
     private DateTime? _frontedLaunch;
+
+    /// <summary>The launch for which the launcher was put in front when the game connected (once: the bridge connects again after a dropped connection).</summary>
+    private DateTime? _frontedOnConnect;
 
     /// <summary>Starting, running without the launcher, closing or connected, from the process, the bridge and the last launch.</summary>
     private readonly GameWatch _watch = new();
@@ -347,8 +392,13 @@ public partial class MainViewModel : ObservableObject
         // Remembered so that the bridge going away while this process still runs reads as the game closing.
         _watch.Connected(hello.ProcessId, Service.LastLaunchUtc);
         UpdateGameState();
-        // Never minimise the game: Void Crew loses its graphics device (and crashes) when minimised while it loads.
-        if (Service.LastLaunchMode == LaunchMode.Browse && Service.Settings.MinimizeGameWhenBrowsing) ShowWindow();
+        // Never minimise the game: Void Crew loses its graphics device (and crashes) when minimised while it loads. Once
+        // per launch: a connection that drops and comes back while you play mustn't take the game's focus away.
+        if (Service.LastLaunchMode == LaunchMode.Browse && Service.Settings.MinimizeGameWhenBrowsing && _frontedOnConnect != Service.LastLaunchUtc)
+        {
+            _frontedOnConnect = Service.LastLaunchUtc;
+            ShowWindow();
+        }
         if (Service.CurrentLaunch == null)
         {
             SetStatus(Loc.T("Void Crew is connected, but it wasn't started by this launcher session; its mod list is unknown."));
@@ -376,7 +426,7 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>voidcrewmod.com in the browser.</summary>
     [RelayCommand]
-    private void OpenWebsite() => Format.Open(AppInfo.WebsiteUrl);
+    private void OpenWebsite() => Format.OpenUrl(AppInfo.WebsiteUrl);
 
     [RelayCommand(CanExecute = nameof(GameRunning))]
     private void FocusGame()
@@ -396,6 +446,51 @@ public partial class MainViewModel : ObservableObject
         if (choice != 0) return await GameProcess.WaitForExitAsync(TimeSpan.FromSeconds(30));
         GameProcess.Kill();
         return await GameProcess.WaitForExitAsync(TimeSpan.FromSeconds(10));
+    }
+
+    /// <summary>
+    /// Saves settings.json now. A file another program holds (antivirus, a sync tool) is said in the status bar instead
+    /// of thrown from a switch or text box, whose binding would swallow the error: the settings stay as chosen and are
+    /// saved with the next change. False when they couldn't be saved.
+    /// </summary>
+    public bool SaveSettings()
+    {
+        _settingsTimer?.Stop();
+        try
+        {
+            Service.SaveSettings();
+            return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            AppLog.Warn($"Saving the launcher's settings failed: {e.Message}");
+            SetStatus(Loc.F("The launcher couldn't save its settings: {0}", e.Message));
+            return false;
+        }
+    }
+
+    /// <summary>Running while a settings change waits to be saved.</summary>
+    private DispatcherTimer? _settingsTimer;
+
+    /// <summary>
+    /// Saves settings.json half a second after the last change: a lobby name being typed or the crew size being dragged is
+    /// written once, not on every key or step.
+    /// </summary>
+    public void SaveSettingsSoon()
+    {
+        if (_settingsTimer == null)
+        {
+            _settingsTimer = new DispatcherTimer(DispatcherPriority.Background, _dispatcher) { Interval = TimeSpan.FromMilliseconds(500) };
+            _settingsTimer.Tick += (_, _) => SaveSettings();
+        }
+        _settingsTimer.Stop();
+        _settingsTimer.Start();
+    }
+
+    /// <summary>Saves a settings change that is still waiting (the launcher is closing).</summary>
+    public void SaveWaitingSettings()
+    {
+        if (_settingsTimer?.IsEnabled == true) SaveSettings();
     }
 
     /// <summary>False, with a note in the status bar, while a long task runs (quick actions that change files check it).</summary>
@@ -502,6 +597,8 @@ public partial class MainViewModel : ObservableObject
     /// <param name="link">A voidcrewmod:// link the launcher was started with, handled once the mod list is loaded.</param>
     public async Task StartAsync(string? updatedFrom = null, string? link = null)
     {
+        // Passed on if the launcher updates itself before it gets to the link.
+        _startLink = link;
         // Links wait for this; whatever fails here, they mustn't wait forever.
         try
         {
@@ -531,21 +628,27 @@ public partial class MainViewModel : ObservableObject
                 string? githubText = await AddMissingGitHubModsAsync();
                 if (githubText != null) modsText = modsText == null ? githubText : modsText + " " + githubText;
                 int updates = Service.Mods.Updates().Count;
-                string text = modsText ?? (updates > 0 ? Loc.F("{0} of your mods can be updated (MOD MANAGER).", updates) : Loc.T("Ready."));
-                SetStatus(updatedText != null ? Loc.F("{0} {1}", updatedText, text) : text);
+                string? text = modsText ?? (updates > 0 ? Loc.F("{0} of your mods can be updated (MOD MANAGER).", updates) : null);
+                // What the update check said (LATER, say) stays in the line, after the mod list's progress replaced it.
+                SetStatus(Sentences(updatedText, _launcherNote, text) ?? Loc.T("Ready."));
             }
             catch (Exception e)
             {
                 AppLog.Error("Loading Thunderstore's mod list failed", e);
                 string text = Loc.T("Thunderstore couldn't be reached. Mods you have still work; try REFRESH on the MODS tab later.");
-                SetStatus(updatedText != null ? Loc.F("{0} {1}", updatedText, text) : text);
+                SetStatus(Sentences(updatedText, _launcherNote, text)!);
             }
         }
         finally
         {
             _started.TrySetResult();
         }
-        if (link != null) await HandleLinkAsync(link);
+        if (link != null)
+        {
+            // Handled here from now on: a restart (a new language, a later update) mustn't bring it back.
+            _startLink = null;
+            await HandleLinkAsync(link);
+        }
         if (Service.GameDirectory == null)
         {
             Navigate("settings");
@@ -555,6 +658,13 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>Set once start-up has loaded the mod list.</summary>
     private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>What start-up's launcher update check said in the status line (LATER, a failed download), for its last line.</summary>
+    private string? _launcherNote;
+
+    /// <summary>The parts that have something to say, one after the other; null when none has.</summary>
+    private static string? Sentences(params string?[] parts) =>
+        parts.Where(p => !string.IsNullOrEmpty(p)).Aggregate((string?)null, (line, part) => line == null ? part : Loc.F("{0} {1}", line, part));
 
     /// <summary>
     /// A voidcrewmod:// link from a website: brings the launcher up and, for an install, shows the mod and installs it
@@ -680,10 +790,12 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>
     /// Updates every installed Thunderstore mod that has a newer version (checked with Thunderstore first). Returns the
-    /// status line for what changed, or null when every mod was up to date.
+    /// status line for what happened; null only when every mod is up to date. When Thunderstore couldn't be asked, or the
+    /// update didn't run (the launcher was busy) or failed, the line says so instead.
     /// </summary>
     public async Task<string?> UpdateModsAsync()
     {
+        bool asked = true;
         try
         {
             await Service.FreshenAsync(Service.Library.Mods.Where(m => m.Source is ModSource.Thunderstore or ModSource.GitHub).Select(m => m.Id));
@@ -691,18 +803,26 @@ public partial class MainViewModel : ObservableObject
         catch (Exception e) when (e is not OperationCanceledException)
         {
             AppLog.Warn($"Checking the installed mods on Thunderstore failed: {e.Message}");
+            asked = false;
         }
         if (Service.Mods.Updates().Count == 0)
         {
             await TellGameAboutUpdatesAsync();
-            return null;
+            return asked ? null : Loc.T("Thunderstore couldn't be reached. Mods you have still work; try REFRESH on the MODS tab later.");
         }
 
         (List<string> Updated, List<string> Failed) result = (new List<string>(), new List<string>());
-        await RunAsync(Loc.T("Updating mods"), async () =>
+        bool ran = await RunAsync(Loc.T("Updating mods"), async () =>
         {
             result = await Service.UpdateModsAsync(new SyncProgress<InstallStatus>(s => OnUi(() => SetStatus(s.Message, s.Fraction))));
         });
+        if (!ran)
+        {
+            // Busy, cancelled or failed: RunAsync has said which. The game still hears about the updates that are out.
+            string said = StatusText;
+            await TellGameAboutUpdatesAsync();
+            return said;
+        }
         string text = "";
         if (result.Updated.Count > 0)
         {
@@ -795,12 +915,20 @@ public partial class MainViewModel : ObservableObject
             return false;
         }
         if (manual && !CheckIdle(Loc.T("Checking for updates"))) return false;
+        // What this check says in the status line; start-up's is kept for the line it ends with.
+        void Say(string text)
+        {
+            SetStatus(text);
+            if (!manual) _launcherNote = text;
+        }
         using var updater = new Updater();
         LauncherRelease? release;
         try
         {
             if (manual) SetStatus(Loc.T("Checking GitHub for a new launcher..."));
-            release = await updater.CheckAsync(AppInfo.Version);
+            // Like the launcher's other web requests, 20 seconds at most: start-up loads the mod list only after this.
+            using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            release = await updater.CheckAsync(AppInfo.Version, limit.Token);
         }
         catch (Exception e)
         {
@@ -818,7 +946,7 @@ public partial class MainViewModel : ObservableObject
         if (!manual && settings.UpdateTriedVersion == release.Version && settings.UpdateTriedUtc is { } tried && DateTime.UtcNow - tried < TimeSpan.FromHours(6))
         {
             AppLog.Warn($"Launcher {release.Version} was installed at {tried:u} but this is still {AppInfo.Version}; not trying again for a while.");
-            SetStatus(Loc.F("Launcher {0} is out but didn't install. Try CHECK FOR UPDATES on the SETTINGS tab, or get it from GitHub.", release.Version));
+            Say(Loc.F("Launcher {0} is out but didn't install. Try CHECK FOR UPDATES on the SETTINGS tab, or get it from GitHub.", release.Version));
             return false;
         }
 
@@ -827,7 +955,7 @@ public partial class MainViewModel : ObservableObject
                 Loc.T("UPDATE"), Loc.T("LATER")))
         {
             AppLog.Info($"Launcher {release.Version} is out; the player chose to update later.");
-            SetStatus(Loc.F("Launcher {0} is out. CHECK FOR UPDATES on the SETTINGS tab installs it.", release.Version));
+            Say(Loc.F("Launcher {0} is out. CHECK FOR UPDATES on the SETTINGS tab installs it.", release.Version));
             return false;
         }
 
@@ -845,27 +973,27 @@ public partial class MainViewModel : ObservableObject
             {
                 if (error == null || error is OperationCanceledException)
                 {
-                    SetStatus(Loc.F("Update to {0} cancelled. The launcher tries again next time it starts.", release.Version));
+                    Say(Loc.F("Update to {0} cancelled. The launcher tries again next time it starts.", release.Version));
                 }
                 else
                 {
                     AppLog.Error($"Downloading launcher {release.Version} failed", error);
-                    SetStatus(Loc.F("The launcher couldn't update to {0}: {1}", release.Version, error.Message));
+                    Say(Loc.F("The launcher couldn't update to {0}: {1}", release.Version, error.Message));
                 }
                 return false;
             }
 
             settings.UpdateTriedVersion = release.Version;
             settings.UpdateTriedUtc = DateTime.UtcNow;
-            Service.SaveSettings();
+            SaveSettings();
             try
             {
-                Installer.StartUpdate(setup, Environment.ProcessPath!, LauncherArguments.Concat(new[] { Installer.UpdatedArgument, AppInfo.Version }));
+                Installer.StartUpdate(setup, Environment.ProcessPath!, RestartArguments.Concat(new[] { Installer.UpdatedArgument, AppInfo.Version }));
             }
             catch (Exception e)
             {
                 AppLog.Error("Starting the launcher update failed", e);
-                SetStatus(Loc.F("The launcher couldn't update to {0}: {1}", release.Version, e.Message));
+                Say(Loc.F("The launcher couldn't update to {0}: {1}", release.Version, e.Message));
                 return false;
             }
             ClosingForUpdate = true;
@@ -877,6 +1005,4 @@ public partial class MainViewModel : ObservableObject
             if (!ClosingForUpdate) ReleaseBusy();
         }
     }
-
-    public static void Ui(Action action) => Application.Current?.Dispatcher.BeginInvoke(action);
 }

@@ -19,22 +19,34 @@ public partial class HostModViewModel : ObservableObject
 {
     private readonly HostViewModel _owner;
 
+    /// <summary>The same rules the launch lists the mods by (it reads your choices from the settings this row changes).</summary>
+    private readonly HostNeeds _needs;
+
     /// <param name="needs">Your choices, and the mods joining players are checked for (everyone gets those).</param>
     public HostModViewModel(HostViewModel owner, InstalledMod mod, HostNeeds needs)
     {
         _owner = owner;
+        _needs = needs;
         Mod = mod;
         Checked = needs.Checked(mod);
+        ModNeed auto = needs.Auto(mod);
         Options = new List<NeedOption>
         {
-            new(null, Loc.F("Auto: {0}", Describe(needs.Auto(mod)))),
+            new(null, Loc.F("Auto: {0}", Describe(auto))),
             new(ModNeed.Everyone, Loc.T("Everyone needs it")),
             new(ModNeed.HostOnly, Loc.T("Only the host runs it")),
             new(ModNeed.ClientOnly, Loc.T("Client-side (my own game only)")),
         };
         ModNeed? chosen = needs.Chosen(mod.Id);
         selected = Options.FirstOrDefault(o => o.Need == chosen) ?? Options[0];
+        Key = string.Join("\u001f", mod.Id, mod.Version, Name, Author, Checked, auto, chosen);
     }
+
+    /// <summary>
+    /// What the row shows, as it was made (the library changes mods in place): when the list is drawn again, a row whose
+    /// key hasn't changed stays as it is, so a WHO NEEDS IT list that is open stays open.
+    /// </summary>
+    public string Key { get; }
 
     public InstalledMod Mod { get; }
     public string Name => Mod.DisplayName;
@@ -47,11 +59,12 @@ public partial class HostModViewModel : ObservableObject
 
     [ObservableProperty] private NeedOption selected;
 
-    public ModNeed Effective => Checked ? ModNeed.Everyone : Selected.Need ?? Mod.GuessedNeed;
+    /// <summary>What the lobby lists for joining players.</summary>
+    public ModNeed Effective => _needs.Effective(Mod);
     public bool JoinersGetIt => Effective is ModNeed.Everyone or ModNeed.Unknown;
 
     /// <summary>You picked less than everyone for a mod joining players are checked for: everyone gets it anyway.</summary>
-    public bool Overridden => Checked && Selected.Need is { } need && need != ModNeed.Everyone;
+    public bool Overridden => _needs.Overridden(Mod);
 
     partial void OnSelectedChanged(NeedOption value)
     {
@@ -107,14 +120,17 @@ public partial class HostViewModel : ObservableObject
         set => IsPublic = !value;
     }
 
+    /// <summary>Draws the mods again: rows that show the same as before stay (with an open list), the rest are replaced.</summary>
     public void RefreshMods()
     {
-        Mods.Clear();
         HostNeeds needs = _main.Service.CurrentHostNeeds();
+        var rows = new List<HostModViewModel>();
         foreach (InstalledMod mod in _main.Service.Library.Enabled.OrderBy(m => m.InstalledAsDependency).ThenBy(m => m.DisplayName))
         {
-            Mods.Add(new HostModViewModel(this, mod, needs));
+            var row = new HostModViewModel(this, mod, needs);
+            rows.Add(Mods.FirstOrDefault(old => old.Key == row.Key) ?? row);
         }
+        Mods.SyncTo(rows);
         // The game's 6, or more with a mod that raises it: the bridge puts the size on the game's host panel.
         int limit = ModPolicy.RoomLimit(Mods.Select(m => m.Mod.Id));
         _limiting = true;
@@ -136,31 +152,41 @@ public partial class HostViewModel : ObservableObject
         Dictionary<string, ModNeed> chosen = _main.Service.Settings.Host.ModNeeds;
         if (need == null) chosen.Remove(id);
         else chosen[id] = need.Value;
-        _main.Service.SaveSettings();
+        _main.SaveSettings();
     }
 
-    partial void OnLobbyNameChanged(string value) => Save();
+    // Typing the name or dragging the crew size changes these many times a second: they are saved a moment after the last
+    // change (and right away when you host), only when what's saved changes.
+    partial void OnLobbyNameChanged(string value) => Remember();
     partial void OnIsPublicChanged(bool value)
     {
         OnPropertyChanged(nameof(IsPrivate));
-        Save();
+        Remember();
     }
-    partial void OnCrossPlayChanged(bool value) => Save();
+    partial void OnCrossPlayChanged(bool value) => Remember();
     partial void OnMaxPlayersChanged(int value)
     {
         if (_limiting) return;
         _wantedMaxPlayers = value;
-        Save();
+        Remember();
     }
 
-    private void Save()
+    /// <summary>Puts the page's values into the settings; true when that changed them.</summary>
+    private bool Apply()
     {
         HostSettings settings = _main.Service.Settings.Host;
-        settings.Name = LobbyName.Trim();
+        string name = LobbyName.Trim();
+        if (settings.Name == name && settings.IsPublic == IsPublic && settings.CrossPlay == CrossPlay && settings.MaxPlayers == _wantedMaxPlayers) return false;
+        settings.Name = name;
         settings.IsPublic = IsPublic;
         settings.CrossPlay = CrossPlay;
         settings.MaxPlayers = _wantedMaxPlayers;
-        _main.Service.SaveSettings();
+        return true;
+    }
+
+    private void Remember()
+    {
+        if (Apply()) _main.SaveSettingsSoon();
     }
 
     public void NotifyCommands() => HostLobbyCommand.NotifyCanExecuteChanged();
@@ -170,7 +196,9 @@ public partial class HostViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanHostLobby))]
     private async Task HostLobby()
     {
-        Save();
+        // Saved now rather than in a moment.
+        if (Apply()) _main.SaveSettings();
+        else _main.SaveWaitingSettings();
         var command = new HostCommand { Name = LobbyName.Trim(), IsPublic = IsPublic, MaxPlayers = MaxPlayers, CrossPlay = CrossPlay };
         LauncherService service = _main.Service;
         await _main.RunAsync(Loc.T("Hosting your lobby"), async () =>

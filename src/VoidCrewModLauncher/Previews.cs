@@ -15,11 +15,17 @@ namespace VoidCrewModLauncher;
 
 /// <summary>
 /// VoidCrewModLauncher.exe --render-previews &lt;folder&gt;: draws each page with sample lobbies and mods into PNGs,
-/// off screen, in a throwaway data folder. Uses Thunderstore's real list (the cached copy when there is one).
+/// off screen, in a throwaway data folder. Uses Thunderstore's real list (the cached copy in the launcher's data folder,
+/// or --data-dir's, when there is one); nothing is written there.
 /// </summary>
 public static class Previews
 {
-    public static void Render(string outDir)
+    /// <summary>The window's size in the README's screenshots.</summary>
+    private const int DefaultWidth = 1360;
+
+    /// <param name="dataDir">The data folder whose cached Thunderstore list to use (--data-dir); null for the usual one.</param>
+    /// <param name="width">The window's width; 0 for the screenshots' (the window can't be narrower than its MinWidth).</param>
+    public static void Render(string outDir, string? dataDir = null, int width = 0)
     {
         Directory.CreateDirectory(outDir);
         // Every binding WPF can't resolve goes to bindings.log, so wiring mistakes show without clicking through.
@@ -30,7 +36,7 @@ public static class Previews
         var paths = new AppPaths(Path.Combine(Path.GetTempPath(), "vcml-preview-" + Guid.NewGuid().ToString("N")));
         paths.EnsureCreated();
         AppLog.Init(Path.Combine(outDir, "preview.log"));
-        AppPaths real = AppPaths.FromEnvironment();
+        AppPaths real = AppPaths.FromEnvironment(dataDir);
         if (File.Exists(real.PackageListCache))
         {
             File.Copy(real.PackageListCache, paths.PackageListCache, true);
@@ -57,7 +63,7 @@ public static class Previews
             WindowStartupLocation = WindowStartupLocation.Manual,
             Left = -30000,
             Top = 0,
-            Width = 1360,
+            Width = width > 0 ? width : DefaultWidth,
             Height = 880,
             ShowActivated = false,
             ShowInTaskbar = false,
@@ -65,13 +71,14 @@ public static class Previews
         dialogs.Owner = window;
         window.Show();
 
+        // The game's state as the launcher words it, in the language being checked.
         model.GameState = GameState.NotRunning;
-        model.GameStateText = "NOT RUNNING";
-        model.SetStatus("Ready.");
+        model.GameStateText = Loc.T("NOT RUNNING");
+        model.SetStatus(Loc.T("Ready."));
         Snap(window, Path.Combine(outDir, "1-browser-not-running.png"));
 
         model.GameState = GameState.Menu;
-        model.GameStateText = "MAIN MENU · EUROPE";
+        model.GameStateText = Loc.F("MAIN MENU · {0}", MainViewModel.RegionName("eu"));
         model.Browser.OnState(new StateMessage
         {
             Phase = "menu",
@@ -83,7 +90,7 @@ public static class Previews
         });
         model.Browser.OnRooms(new RoomsMessage { Region = "eu", Rooms = SampleRooms() });
         model.Browser.Selected = model.Browser.LobbiesView.Cast<LobbyViewModel>().FirstOrDefault(l => l.Lobby.ModSource == LobbyModSource.Advert);
-        model.SetStatus("Void Crew is connected.");
+        model.SetStatus(Loc.T("Ready."));
         Snap(window, Path.Combine(outDir, "2-browser-live.png"));
 
         model.Navigate("mods");

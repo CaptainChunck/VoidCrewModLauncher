@@ -120,8 +120,9 @@ while after as signed releases build up reputation, Windows may warn about the s
 - **Update:** at start the launcher checks GitHub for a new version and asks: UPDATE downloads it (checked against the
   checksum GitHub lists), installs it and opens again; LATER asks next time. SETTINGS > UPDATES turns the check and the
   mod updates off or checks right away. (Version 0.1.0 can't update itself: install 0.2.0 once by hand.)
-- **Uninstall:** Windows **Settings > Apps > Installed apps > Void Crew Mod Launcher > Uninstall**. It asks whether to
-  delete your downloaded mods and settings too, and removes BepInEx's loader from the game folder if the launcher added it.
+- **Uninstall:** close the launcher and Void Crew, then Windows **Settings > Apps > Installed apps > Void Crew Mod Launcher >
+  Uninstall**. It asks whether to delete your downloaded mods and settings too, removes BepInEx's loader from the game
+  folder if the launcher added it, and lists anything it couldn't delete.
 - **Portable:** put an empty `portable.txt` next to the exe (or start it with `--portable`) and it runs where it is.
 
 **VR players (Rai Pal):** on MOD MANAGER > INSTALLED, use IMPORT FROM BEPINEX and pick Rai Pal's BepInEx folder for Void Crew
@@ -193,7 +194,8 @@ the setup first: `https://github.com/CaptainChunck/VoidCrewModLauncher/releases/
   the release; publish the draft once checked. `tools\package.ps1` makes the same setup locally (unsigned) in `dist\`.
 - **Screenshots:** `powershell -ExecutionPolicy Bypass -File tools\screenshots.ps1` redraws `docs\screenshots`.
 - **Look at the pages without the game:** `VoidCrewModLauncher.exe --render-previews <folder>` draws every page with
-  sample lobbies into PNGs.
+  sample lobbies into PNGs; `--preview-language <code>` draws them in a translation (`de`, `ru`...) and
+  `--preview-width <pixels>` at another window width (the smallest is 1080).
 - `--data-dir <folder>` (or the `VCML_DATA_DIR` environment variable) runs the launcher with a separate data folder.
 - To try the install or the self-update without touching your real install: `VCML_INSTALL_ROOT=<folder>` installs into
   that folder (and a test registry key), and `VCML_UPDATE_FEED=<url>` reads the release from that URL (GitHub's release

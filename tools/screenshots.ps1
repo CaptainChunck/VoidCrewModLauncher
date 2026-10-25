@@ -5,8 +5,8 @@ $root = Split-Path $PSScriptRoot -Parent
 $exe = Get-ChildItem (Join-Path $root "src\VoidCrewModLauncher\bin") -Recurse -Filter VoidCrewModLauncher.exe |
     Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if (-not $exe) { throw "Build the launcher first (dotnet build src\VoidCrewModLauncher)." }
-$temp = Join-Path ([System.IO.Path]::GetTempPath()) "vcml-screenshots"
-if (Test-Path $temp) { Remove-Item $temp -Recurse -Force }
+# A folder of its own for each run (two runs at once don't share one).
+$temp = Join-Path ([System.IO.Path]::GetTempPath()) ("vcml-screenshots-" + [guid]::NewGuid().ToString("N").Substring(0, 8))
 & $exe.FullName --render-previews $temp | Out-Null
 $process = Get-Process VoidCrewModLauncher -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $exe.FullName }
 if ($process) { $process | Wait-Process -Timeout 240 }
@@ -25,6 +25,10 @@ foreach ($name in $names.Keys) {
     Copy-Item (Join-Path $temp $name) (Join-Path $out $names[$name]) -Force
 }
 if ((Get-Content (Join-Path $temp "bindings.log") -ErrorAction SilentlyContinue | Measure-Object -Line).Lines -gt 0) {
+    # Kept for reading; a clean run's folder is deleted.
     Write-Warning "Some bindings failed; see $temp\bindings.log"
+}
+else {
+    Remove-Item $temp -Recurse -Force -ErrorAction SilentlyContinue
 }
 Write-Output "Screenshots written to $out"

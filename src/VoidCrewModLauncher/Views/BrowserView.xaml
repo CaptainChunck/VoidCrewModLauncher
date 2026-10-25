@@ -77,11 +77,13 @@
         </Style>
     </UserControl.Resources>
 
+    <!-- The details panel is 410 wide from the window's default size up, and gives up to 50 of that to the lobby list in a
+         narrower window. -->
     <Grid>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*" />
             <ColumnDefinition Width="22" />
-            <ColumnDefinition Width="410" />
+            <ColumnDefinition Width="0.5*" MinWidth="360" MaxWidth="410" />
         </Grid.ColumnDefinitions>
 
         <!-- ============================================================ lobbies -->
@@ -110,23 +112,25 @@
                 <TextBlock DockPanel.Dock="Top" Text="{Binding Banner}" Style="{StaticResource Muted}" Margin="2,0,0,8"
                            Visibility="{Binding HasBanner, Converter={StaticResource Show}}" />
 
-                <!-- Column headings, on the matchmaking list's header band -->
+                <!-- Column headings, on the matchmaking list's header band. The columns share the row's width (the same
+                     definitions as the rows below), so at the window's smallest size the lobby name still has room and
+                     longer words (a translation, a long host name) end in "…" instead of running into the next column. -->
                 <Border DockPanel.Dock="Top" Background="{StaticResource HeaderBand}" Padding="14,7,20,6" Margin="0,0,6,0">
                 <Grid>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="140" />
-                        <ColumnDefinition Width="72" />
-                        <ColumnDefinition Width="104" />
-                        <ColumnDefinition Width="150" />
-                        <ColumnDefinition Width="104" />
+                        <ColumnDefinition Width="4*" MinWidth="110" />
+                        <ColumnDefinition Width="2*" MaxWidth="140" />
+                        <ColumnDefinition Width="58" />
+                        <ColumnDefinition Width="2*" MaxWidth="110" />
+                        <ColumnDefinition Width="3*" MaxWidth="150" />
+                        <ColumnDefinition Width="2*" MinWidth="100" MaxWidth="110" />
                     </Grid.ColumnDefinitions>
-                    <TextBlock Text="{i:T LOBBY}" Style="{StaticResource Label}" />
-                    <TextBlock Grid.Column="1" Text="{i:T HOST}" Style="{StaticResource Label}" />
-                    <TextBlock Grid.Column="2" Text="{i:T CREW}" Style="{StaticResource Label}" />
-                    <TextBlock Grid.Column="3" Text="{i:T WHERE}" Style="{StaticResource Label}" />
-                    <TextBlock Grid.Column="4" Text="{i:T MODS}" Style="{StaticResource Label}" />
-                    <TextBlock Grid.Column="5" Text="{i:T YOU}" Style="{StaticResource Label}" />
+                    <TextBlock Text="{i:T LOBBY}" Style="{StaticResource Label}" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Column="1" Text="{i:T HOST}" Style="{StaticResource Label}" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Column="2" Text="{i:T CREW}" Style="{StaticResource Label}" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Column="3" Text="{i:T WHERE}" Style="{StaticResource Label}" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Column="4" Text="{i:T MODS}" Style="{StaticResource Label}" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Column="5" Text="{i:T YOU}" Style="{StaticResource Label}" TextTrimming="CharacterEllipsis" />
                 </Grid>
                 </Border>
 
@@ -136,29 +140,31 @@
                             <DataTemplate>
                                 <Grid>
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="140" />
-                                        <ColumnDefinition Width="72" />
-                                        <ColumnDefinition Width="104" />
-                                        <ColumnDefinition Width="150" />
-                                        <ColumnDefinition Width="104" />
+                                        <ColumnDefinition Width="4*" MinWidth="110" />
+                                        <ColumnDefinition Width="2*" MaxWidth="140" />
+                                        <ColumnDefinition Width="58" />
+                                        <ColumnDefinition Width="2*" MaxWidth="110" />
+                                        <ColumnDefinition Width="3*" MaxWidth="150" />
+                                        <ColumnDefinition Width="2*" MinWidth="100" MaxWidth="110" />
                                     </Grid.ColumnDefinitions>
                                     <StackPanel Margin="0,0,10,0">
-                                        <StackPanel Orientation="Horizontal">
-                                            <Border Style="{StaticResource RowBadge}" BorderBrush="#FF8000" Visibility="{Binding IsSessionModded, Converter={StaticResource Show}}"
+                                        <!-- A DockPanel, not a horizontal StackPanel: only a name with a width to fit can end in "…". -->
+                                        <DockPanel>
+                                            <Border DockPanel.Dock="Left" Style="{StaticResource RowBadge}" BorderBrush="#FF8000" Visibility="{Binding IsSessionModded, Converter={StaticResource Show}}"
                                                     ToolTip="[mod_session]">
                                                 <TextBlock Text="M" Style="{StaticResource BadgeText}" Foreground="#FF8000" />
                                             </Border>
                                             <TextBlock Text="{Binding Name}" FontSize="16" FontWeight="Bold" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                                        </StackPanel>
+                                        </DockPanel>
                                         <TextBlock Text="{Binding Ship}" FontSize="12" Opacity="0.72" TextTrimming="CharacterEllipsis" Margin="0,2,0,0" />
                                     </StackPanel>
                                     <TextBlock Grid.Column="1" Text="{Binding Host}" FontSize="14" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,0,8,0" />
-                                    <TextBlock Grid.Column="2" Text="{Binding Players}" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center" />
-                                    <TextBlock Grid.Column="3" Text="{Binding Where}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" />
-                                    <TextBlock Grid.Column="4" Text="{Binding ModsSummary}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" ToolTip="{Binding ModsTooltip}" />
+                                    <TextBlock Grid.Column="2" Text="{Binding Players}" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,0,4,0" />
+                                    <TextBlock Grid.Column="3" Text="{Binding Where}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,0,4,0" />
+                                    <TextBlock Grid.Column="4" Text="{Binding ModsSummary}" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,0,4,0"
+                                               ToolTip="{Binding ModsTooltip}" />
                                     <Border Grid.Column="5" Style="{StaticResource ReadyBadge}" HorizontalAlignment="Left">
-                                        <TextBlock Text="{Binding ReadyText}" Style="{StaticResource ReadyText}" />
+                                        <TextBlock Text="{Binding ReadyText}" Style="{StaticResource ReadyText}" TextTrimming="CharacterEllipsis" />
                                     </Border>
                                 </Grid>
                             </DataTemplate>
@@ -282,7 +288,7 @@
                                                     <TextBlock Foreground="White" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis">
                                                         <Run Text="{Binding Name, Mode=OneWay}" /> <Run Text="{Binding Version, Mode=OneWay}" FontWeight="Normal" Foreground="{StaticResource TextMuted}" FontSize="12" />
                                                     </TextBlock>
-                                                    <TextBlock Text="{Binding Author}" Foreground="{StaticResource TextMuted}" FontSize="11.5" Visibility="{Binding Author, Converter={StaticResource Show}}" />
+                                                    <TextBlock Text="{Binding Author}" Foreground="{StaticResource TextMuted}" FontSize="11.5" TextTrimming="CharacterEllipsis" Visibility="{Binding Author, Converter={StaticResource Show}}" />
                                                     <TextBlock Text="{Binding Note}" Foreground="{StaticResource Orange}" FontSize="11.5" TextWrapping="Wrap" Visibility="{Binding Note, Converter={StaticResource Show}}" />
                                                 </StackPanel>
                                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">

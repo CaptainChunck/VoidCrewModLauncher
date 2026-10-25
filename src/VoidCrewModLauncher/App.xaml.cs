@@ -10,13 +10,17 @@ namespace VoidCrewModLauncher;
 
 /// <summary>
 /// Start-up: one launcher at a time, the data folder (--data-dir or VCML_DATA_DIR), logging, then the main window.
-/// --render-previews &lt;folder&gt; [--preview-language &lt;code&gt;] draws every page with sample data into PNGs and exits
-/// (for checking the look).
+/// --render-previews &lt;folder&gt; [--preview-language &lt;code&gt;] [--preview-width &lt;pixels&gt;] draws every page with
+/// sample data into PNGs and exits (for checking the look).
 /// </summary>
 public partial class App : Application
 {
     private Mutex? _single;
     private LauncherService? _service;
+    private MainViewModel? _model;
+
+    /// <summary>One launcher per Windows user: the launcher holds this while it runs (an uninstall too).</summary>
+    private static string SingleInstanceName => "VoidCrewModLauncher-" + Environment.UserName;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -28,10 +32,12 @@ public partial class App : Application
 
         if (previews != null)
         {
-            // English for the README's screenshots; --preview-language <code> to check how a translation fits.
+            // English for the README's screenshots; --preview-language <code> to check how a translation fits, and
+            // --preview-width <pixels> at another window width (the window's smallest is 1080).
             Loc.Use(Argument(args, "--preview-language") ?? Loc.English);
             ShutdownMode = ShutdownMode.OnExplicitShutdown;
-            Previews.Render(previews);
+            int width = int.TryParse(Argument(args, "--preview-width"), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int w) ? w : 0;
+            Previews.Render(previews, dataDir, width);
             Shutdown();
             return;
         }
@@ -54,7 +60,10 @@ public partial class App : Application
         if (args.Any(a => a.Equals("--uninstall", StringComparison.OrdinalIgnoreCase)))
         {
             ShutdownMode = ShutdownMode.OnExplicitShutdown;
-            RunUninstall(locations, dataDir);
+            // Held while uninstalling, so the launcher can't start meanwhile; when it is already open, it keeps its
+            // files (and the loader in the game folder) in use, so the uninstall waits for it to be closed.
+            _single = new Mutex(true, SingleInstanceName, out bool alone);
+            RunUninstall(locations, dataDir, launcherOpen: !alone);
             Shutdown();
             return;
         }
@@ -66,7 +75,7 @@ public partial class App : Application
 
         // A voidcrewmod:// link (a website's "download with the Mod Launcher") starts the launcher with the link.
         string? link = LauncherLinks.FindIn(args);
-        _single = new Mutex(true, "VoidCrewModLauncher-" + Environment.UserName, out bool first);
+        _single = new Mutex(true, SingleInstanceName, out bool first);
         if (!first)
         {
             // The launcher is open: it handles the link (sent off the UI thread, so a busy launcher can't hang this one).
@@ -111,10 +120,12 @@ public partial class App : Application
         _service.Start();
         var dialogs = new Dialogs();
         var model = new MainViewModel(_service, dialogs) { LauncherArguments = LauncherArguments(args) };
+        _model = model;
         var window = new MainWindow { DataContext = model };
         dialogs.Owner = window;
         MainWindow = window;
         window.Show();
+        _windowShown = true;
         _links = new LinkPipe();
         _links.Start(received => Dispatcher.BeginInvoke(() => _ = model.HandleLinkAsync(received)));
         RegisterLinks(locations);
@@ -160,8 +171,8 @@ public partial class App : Application
         }
     }
 
-    /// <summary>The marker before a link the launcher passes to itself when it restarts after a self-update.</summary>
-    private const string LinkArgument = "--link";
+    /// <summary>The marker before a link the launcher passes to itself when it restarts before handling it (see MainViewModel.RestartArguments).</summary>
+    public const string LinkArgument = "--link";
 
     /// <summary>
     /// A start by a voidcrewmod:// link has the link and nothing else: a link handler that doesn't quote it can split one
@@ -214,14 +225,15 @@ public partial class App : Application
         }
     }
 
-    /// <summary>The arguments a restarted launcher keeps (after a self-update).</summary>
+    /// <summary>
+    /// The options a restarted launcher keeps (after a self-update or a language change). A link it was started with goes
+    /// along only while it waits to be handled: MainViewModel.RestartArguments adds it.
+    /// </summary>
     private static List<string> LauncherArguments(string[] args)
     {
         var kept = new List<string>();
         if (args.Any(a => a.Equals("--portable", StringComparison.OrdinalIgnoreCase))) kept.Add("--portable");
         if (Argument(args, "--data-dir") is { } dataDir) kept.AddRange(new[] { "--data-dir", dataDir });
-        // A link that started this launcher is handled after the update instead.
-        if (LauncherLinks.FindIn(args) is { } link) kept.AddRange(new[] { LinkArgument, link });
         return kept;
     }
 
@@ -253,17 +265,48 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        // A lobby name typed a moment ago is still waiting to be saved.
+        _model?.SaveWaitingSettings();
         _links?.Dispose();
         _service?.Dispose();
         _single?.Dispose();
         base.OnExit(e);
     }
 
+    /// <summary>Set once the main window is up: an error before that leaves no window to close the launcher with.</summary>
+    private bool _windowShown;
+
+    /// <summary>An error message is open; errors meanwhile only go to the log.</summary>
+    private bool _showingError;
+
+    /// <summary>The last error shown, and when its message was closed: the same error again soon after is only logged.</summary>
+    private string? _lastError;
+
+    private DateTime _lastErrorClosedUtc;
+
     private void OnUnhandled(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
         AppLog.Error("Unexpected error", e.Exception);
-        MessageBox.Show(Loc.F("Something went wrong:\n\n{0}\n\nDetails are in the launcher's log (SETTINGS > Launcher log).", e.Exception.Message), AppInfo.Name, MessageBoxButton.OK, MessageBoxImage.Error);
         e.Handled = true;
+        // One message at a time: something that fails every second (a timer) would otherwise stack them up.
+        bool repeat = e.Exception.Message == _lastError && DateTime.UtcNow - _lastErrorClosedUtc < TimeSpan.FromSeconds(30);
+        if (!_showingError && !repeat)
+        {
+            _showingError = true;
+            try
+            {
+                MessageBox.Show(Loc.F("Something went wrong:\n\n{0}\n\nDetails are in the launcher's log (SETTINGS > Launcher log).", e.Exception.Message), AppInfo.Name, MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                _showingError = false;
+                _lastError = e.Exception.Message;
+                _lastErrorClosedUtc = DateTime.UtcNow;
+            }
+        }
+        // Start-up stopped before the window came up: with no window to close, the launcher would stay running unseen
+        // (and keep "already open" for every later start).
+        if (!_windowShown) Shutdown();
     }
 
     /// <summary>Installs this exe and starts the installed copy. False when it should run from here instead.</summary>
@@ -298,9 +341,22 @@ public partial class App : Application
         }
     }
 
-    private static void RunUninstall(InstallLocations locations, string? dataDir)
+    /// <param name="launcherOpen">The launcher is running (it holds the one-launcher lock): nothing is removed until it's closed.</param>
+    private static void RunUninstall(InstallLocations locations, string? dataDir, bool launcherOpen)
     {
         var dialogs = new Dialogs();
+        // An open launcher or a running game has the launcher's files (and the loader in the game folder) in use: the
+        // uninstall would leave half of them behind, so it asks for them to be closed first.
+        if (launcherOpen)
+        {
+            dialogs.Info(Loc.T("Uninstall"), Loc.T("The Void Crew Mod Launcher is open. Close it, then uninstall it again."));
+            return;
+        }
+        if (Core.Game.GameProcess.IsRunning())
+        {
+            dialogs.Info(Loc.T("Close Void Crew first"), Loc.T("Void Crew has the loader open while it runs."));
+            return;
+        }
         if (!dialogs.Confirm(Loc.T("Uninstall"), Loc.T("Remove the Void Crew Mod Launcher from this PC?"), Loc.T("UNINSTALL"))) return;
         AppPaths paths = AppPaths.FromEnvironment(dataDir);
         // KEEP THEM is the Enter key's, so pressing Enter through the questions never deletes the player's mods.
@@ -317,11 +373,32 @@ public partial class App : Application
         {
             AppLog.Warn("Uninstall could not find the game folder: " + error.Message);
         }
-        Installer.Uninstall(locations, game, removeData ? paths.Root : null);
+        try
+        {
+            Installer.Uninstall(locations, game, removeData ? paths.Root : null);
+        }
+        catch (Exception error)
+        {
+            dialogs.Error(Loc.T("Uninstall"), Loc.F("The launcher couldn't remove everything: {0}", error.Message));
+            return;
+        }
+        // What the uninstall couldn't delete (a file another program has open) is said, not passed over.
+        List<string> left = removeData ? LeftOver(paths) : new List<string>();
+        if (left.Count > 0)
+        {
+            dialogs.Error(Loc.T("Uninstalled"), Loc.F("The Void Crew Mod Launcher is removed, but these couldn't be deleted. Close any program that might have them open and delete them yourself:\n{0}",
+                string.Join("\n", left.Take(10))));
+            return;
+        }
         dialogs.Info(Loc.T("Uninstalled"), removeData
             ? Loc.T("The Void Crew Mod Launcher is removed.")
             : Loc.F("The Void Crew Mod Launcher is removed. Your mods and settings are still in {0}.", paths.Root));
     }
+
+    /// <summary>The launcher's own files and folders still in its data folder (AppPaths.DeleteOwnFiles deletes these).</summary>
+    private static List<string> LeftOver(AppPaths paths) =>
+        new[] { paths.SettingsFile, paths.LibraryFile, paths.Store, paths.Cache, paths.Runtime, paths.Logs }
+            .Where(p => File.Exists(p) || Directory.Exists(p)).ToList();
 
     private static string? Argument(string[] args, string name)
     {
