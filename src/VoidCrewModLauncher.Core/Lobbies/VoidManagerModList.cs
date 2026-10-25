@@ -1,4 +1,5 @@
 using System.Text;
+using VoidCrewModLauncher.Protocol;
 
 namespace VoidCrewModLauncher.Core.Lobbies;
 
@@ -10,12 +11,18 @@ public sealed record VoidManagerMod(string Name, string Guid, string Version, by
 /// lobby shows to everyone. Its "hashless" form, written with .NET's BinaryWriter:
 /// string VoidManager version, int count, then per mod: string name, string GUID, string version, byte multiplayer
 /// type, string Thunderstore id ("Namespace/Name", often empty).
+/// The list comes from another player, so it is read within limits (<see cref="LobbyAdvert.MaxVoidManagerListBytes"/>,
+/// at most 1000 mods, none with an over-long name, GUID, version or id) and its text without the characters
+/// <see cref="LobbyAdvert.CleanName"/> removes.
 /// </summary>
 public static class VoidManagerModList
 {
+    /// <summary>The base64 text of the biggest list read.</summary>
+    private const int MaxBase64Length = (LobbyAdvert.MaxVoidManagerListBytes + 2) / 3 * 4;
+
     public static (string Version, List<VoidManagerMod> Mods)? Decode(string? base64)
     {
-        if (string.IsNullOrEmpty(base64)) return null;
+        if (string.IsNullOrEmpty(base64) || base64.Length > MaxBase64Length) return null;
         try
         {
             return Decode(Convert.FromBase64String(base64));
@@ -28,20 +35,23 @@ public static class VoidManagerModList
 
     public static (string Version, List<VoidManagerMod> Mods)? Decode(byte[] data)
     {
+        if (data.Length > LobbyAdvert.MaxVoidManagerListBytes) return null;
         try
         {
             using var reader = new BinaryReader(new MemoryStream(data), Encoding.UTF8);
-            string version = reader.ReadString();
+            string version = LobbyAdvert.CleanName(reader.ReadString());
             int count = reader.ReadInt32();
-            if (count < 0 || count > 1000) return null;
+            if (count < 0 || count > 1000 || version.Length > LobbyAdvert.MaxVersionLength) return null;
             var mods = new List<VoidManagerMod>(count);
             for (int i = 0; i < count; i++)
             {
-                string name = reader.ReadString();
-                string guid = reader.ReadString();
-                string modVersion = reader.ReadString();
+                string name = LobbyAdvert.CleanName(reader.ReadString());
+                string guid = LobbyAdvert.CleanName(reader.ReadString());
+                string modVersion = LobbyAdvert.CleanName(reader.ReadString());
                 byte type = reader.ReadByte();
-                string downloadId = reader.ReadString();
+                string downloadId = LobbyAdvert.CleanName(reader.ReadString());
+                if (name.Length > LobbyAdvert.MaxIdLength || guid.Length > LobbyAdvert.MaxGuidLength
+                    || modVersion.Length > LobbyAdvert.MaxVersionLength || downloadId.Length > LobbyAdvert.MaxIdLength) continue;
                 mods.Add(new VoidManagerMod(name, guid, modVersion, type, downloadId));
             }
             return (version, mods);

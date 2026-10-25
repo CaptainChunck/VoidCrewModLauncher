@@ -117,7 +117,7 @@ public sealed class LauncherService : IDisposable
 
     /// <summary>
     /// Reads from the DLLs in the store the VoidManager type of installed mods that don't have one yet: mods installed
-    /// before the launcher read it (0.8.0 and older), or whose plugin decides it while the game runs (read again, cheaply).
+    /// before the launcher read it (0.8.1 and older), or whose plugin decides it while the game runs (read again, cheaply).
     /// </summary>
     private void ReadVoidManagerTypes()
     {
@@ -633,15 +633,37 @@ public sealed class LauncherService : IDisposable
     public bool CanJoinWithoutRestart(ResolvedJoin join) =>
         Bridge.IsConnected && join.Downloads.Count == 0 && JoinPlanner.RunningGameFits(join, CurrentLaunch);
 
-    /// <summary>The running game has exactly the Play mods (so hosting needs no restart).</summary>
+    /// <summary>The running game has exactly the Play mods, listed for joining players as now (so hosting needs no restart).</summary>
     public async Task<bool> RunningGameHasPlayModsAsync()
     {
         if (!Bridge.IsConnected || CurrentLaunch?.Mods == null) return false;
-        List<RuntimeMod> play = await PlayModsAsync();
-        var running = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (LaunchMod mod in CurrentLaunch.Mods) running.TryAdd(mod.Id, mod.Version);
+        return RunningGameHosts(await PlayModsAsync());
+    }
+
+    /// <summary>
+    /// Whether the running game would host with <paramref name="play"/>: the same mods at the same versions, each with the
+    /// need letter and "chosen on the HOST tab" it was started with. The bridge reads those from launch.json once, when
+    /// the game starts, and lists the lobby's mods from them, so a choice changed since then only shows after a restart.
+    /// A mod joining players are checked for is listed for everyone either way, so only its version counts (the launcher
+    /// learns some of those from the game when you host, which mustn't cost a restart the next time).
+    /// </summary>
+    internal bool RunningGameHosts(IReadOnlyCollection<RuntimeMod> play)
+    {
+        List<LaunchMod>? launched = CurrentLaunch?.Mods;
+        if (launched == null) return false;
+        var running = new Dictionary<string, LaunchMod>(StringComparer.OrdinalIgnoreCase);
+        foreach (LaunchMod mod in launched) running.TryAdd(mod.Id, mod);
         if (play.Count != running.Count) return false;
-        return play.All(m => running.TryGetValue(m.Id, out string? version) && VersionNumber.Same(version, m.Version));
+        HostNeeds needs = CurrentHostNeeds();
+        foreach (RuntimeMod mod in play)
+        {
+            if (!running.TryGetValue(mod.Id, out LaunchMod? loaded) || !VersionNumber.Same(loaded.Version, mod.Version)) return false;
+            if (Library.Find(mod.Id) is { } mine && needs.Checked(mine)) continue;
+            // As the bridge reads them (LaunchWithAsync writes the letter with LobbyAdvert.NeedLetter).
+            if (LobbyAdvert.ParseNeed(loaded.Need) != LobbyAdvert.ParseNeed(LobbyAdvert.NeedLetter(mod.Need))) return false;
+            if (loaded.NeedSetByUser != mod.NeedSetByUser) return false;
+        }
+        return true;
     }
 
     private void OnBridgeConnected(HelloMessage hello)

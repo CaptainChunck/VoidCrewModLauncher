@@ -14,6 +14,18 @@ namespace VoidCrewModLauncher.Core.Bridge;
 /// </summary>
 public sealed class BridgeServer : IDisposable
 {
+    /// <summary>
+    /// The longest first line read: a hello lists the game's plugins, a few hundred bytes each. Anything can connect to
+    /// the port, so a longer line closes the connection rather than filling the memory.
+    /// </summary>
+    internal const int MaxHelloLength = 1024 * 1024;
+
+    /// <summary>
+    /// The longest message read from the game once it has said hello: the whole lobby list, with every lobby's mod lists
+    /// (the bridge leaves out over-long ones). A longer one is skipped; the connection stays.
+    /// </summary>
+    internal const int MaxLineLength = 16 * 1024 * 1024;
+
     private readonly string _token;
     private readonly CancellationTokenSource _stop = new();
     private readonly HashSet<string> _seenNonces = new(StringComparer.Ordinal);
@@ -100,13 +112,21 @@ public sealed class BridgeServer : IDisposable
         {
             client.NoDelay = true;
             NetworkStream stream = client.GetStream();
-            var reader = new StreamReader(stream, new UTF8Encoding(false));
+            var reader = new LineReader(stream);
             var connection = new Connection(stream);
             try
             {
                 using var helloTimeout = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
                 helloTimeout.CancelAfter(TimeSpan.FromSeconds(10));
-                string? first = await reader.ReadLineAsync(helloTimeout.Token);
+                string? first;
+                try
+                {
+                    first = await reader.ReadLineAsync(MaxHelloLength, helloTimeout.Token);
+                }
+                catch (LineTooLongException)
+                {
+                    first = null;
+                }
                 HelloMessage? hello = first == null ? null : Parse<HelloMessage>(first, MessageTypes.Hello);
                 int port = ((IPEndPoint)client.Client.LocalEndPoint!).Port;
                 if (hello == null || !BridgeAuth.Check(_token, BridgeAuth.HelloPurpose, hello.Nonce, port, hello.Proof) || !FirstUse(hello.Nonce))
@@ -124,9 +144,21 @@ public sealed class BridgeServer : IDisposable
                 AppLog.Info($"Void Crew connected (bridge {hello.BridgeVersion}, game {hello.GameVersion}, {hello.Plugins?.Count ?? 0} plugins).");
                 Connected?.Invoke(hello);
 
+                bool skippedOne = false;
                 while (!_stop.IsCancellationRequested)
                 {
-                    string? line = await reader.ReadLineAsync(_stop.Token);
+                    string? line;
+                    try
+                    {
+                        line = await reader.ReadLineAsync(MaxLineLength, _stop.Token);
+                    }
+                    catch (LineTooLongException)
+                    {
+                        // Lobby data from other players that got far too big; the next list is likely fine. Said once.
+                        if (!skippedOne) AppLog.Warn($"The game sent a message longer than {MaxLineLength / (1024 * 1024)} MB (a lobby list?); skipped it.");
+                        skippedOne = true;
+                        continue;
+                    }
                     if (line == null) break;
                     Dispatch(line);
                 }
@@ -291,3 +323,65 @@ public sealed class BridgeServer : IDisposable
         }
     }
 }
+
+/// <summary>
+/// Reads the bridge's lines (UTF-8, ending in \n) up to a length: StreamReader keeps reading a line that never ends, so
+/// a program on the port, or a lobby list grown out of all proportion, could fill the memory.
+/// </summary>
+internal sealed class LineReader(Stream stream)
+{
+    private static readonly UTF8Encoding Utf8 = new(false);
+    private readonly Decoder _decoder = Utf8.GetDecoder();
+    private readonly byte[] _bytes = new byte[16 * 1024];
+    private readonly char[] _chars = new char[Utf8.GetMaxCharCount(16 * 1024)];
+    private readonly StringBuilder _line = new();
+    private int _next;
+    private int _end;
+
+    /// <summary>The rest of a line that was too long, skipped before the next line is read.</summary>
+    private bool _skipping;
+
+    /// <summary>
+    /// The next line without its line break, or null when the stream has ended. Throws <see cref="LineTooLongException"/>
+    /// as soon as a line passes <paramref name="maxLength"/> characters, without reading the rest of it: the next call
+    /// skips that first.
+    /// </summary>
+    public async Task<string?> ReadLineAsync(int maxLength, CancellationToken cancel)
+    {
+        while (true)
+        {
+            if (_next == _end)
+            {
+                int read = await stream.ReadAsync(_bytes, cancel);
+                if (read == 0) return null;
+                _end = _decoder.GetChars(_bytes, 0, read, _chars, 0);
+                _next = 0;
+                continue;
+            }
+            int start = _next;
+            int newline = Array.IndexOf(_chars, '\n', start, _end - start);
+            int count = (newline >= 0 ? newline : _end) - start;
+            _next = newline >= 0 ? newline + 1 : _end;
+            if (_skipping)
+            {
+                if (newline >= 0) _skipping = false;
+                continue;
+            }
+            if (_line.Length + count > maxLength)
+            {
+                _line.Clear();
+                _skipping = newline < 0;
+                throw new LineTooLongException(maxLength);
+            }
+            _line.Append(_chars, start, count);
+            if (newline < 0) continue;
+            if (_line.Length > 0 && _line[^1] == '\r') _line.Length--;
+            string line = _line.ToString();
+            _line.Clear();
+            return line;
+        }
+    }
+}
+
+/// <summary>A line from the bridge was longer than the reader takes.</summary>
+internal sealed class LineTooLongException(int maxLength) : IOException($"A line from the game was longer than {maxLength} characters.");

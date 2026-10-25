@@ -138,7 +138,8 @@ public sealed class PackageIndex
         {
             int score = 0;
             if (name == wanted) score = 4;
-            else if (name == withoutGame || "voidcrew" + name == wanted) score = 3;
+            // ("voidcrew" + name == wanted, without making that string for every package: lobby lists look names up a lot.)
+            else if (name == withoutGame || (wanted.Length == name.Length + 8 && wanted.StartsWith("voidcrew", StringComparison.Ordinal) && wanted.EndsWith(name, StringComparison.Ordinal))) score = 3;
             else if (name.Length >= 6 && withoutGame.Length >= 6 && (name.Contains(withoutGame) || withoutGame.Contains(name))) score = 1;
             if (score == 0) continue;
             if (!package.IsDeprecated) score = score * 2 + 1;

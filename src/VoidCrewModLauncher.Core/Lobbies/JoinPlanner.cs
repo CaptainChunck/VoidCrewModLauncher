@@ -162,7 +162,7 @@ public sealed class JoinPlanner
 
     /// <summary>
     /// Your copy of the host's local mod: an installed mod (added from your PC, or from Thunderstore) that has one of
-    /// its plugin GUIDs, at the same version; or, when the lobby doesn't say its GUIDs (a host before launcher 0.8.1
+    /// its plugin GUIDs, at the same version; or, when the lobby doesn't say its GUIDs (a host before launcher 0.8.2
     /// without VoidManager), one with the same name. A local mod's id can't be compared: it comes from the file it was
     /// added from on each PC. <paramref name="otherVersion"/> is a copy at another version, when that's all there is.
     /// </summary>
@@ -265,8 +265,10 @@ public sealed class JoinPlanner
     }
 
     /// <summary>
-    /// Whether the game as it runs now can join without a restart: it has every mod the join needs at the same
-    /// version, and nothing else that could make the host's game or VoidManager turn the player away.
+    /// Whether the game as it runs now can join without a restart: it has exactly the mods the join loads (the lobby's,
+    /// the ones you keep, and what they need), at the same versions. Any other mod would stay loaded although the JOIN
+    /// dialog says it is off for this game, and the host's game or VoidManager can turn the player away for it without
+    /// saying why: VoidManager does for any of its "Session" or "All" mods in a lobby that isn't modded.
     /// </summary>
     public static bool RunningGameFits(ResolvedJoin join, LaunchFile? running)
     {
@@ -278,11 +280,6 @@ public sealed class JoinPlanner
             if (!have.TryGetValue(mod.Id, out LaunchMod? loaded) || !VersionNumber.Same(loaded.Version, mod.Version)) return false;
         }
         var wanted = new HashSet<string>(join.Mods.Select(m => m.Id), StringComparer.OrdinalIgnoreCase);
-        foreach (LaunchMod extra in running.Mods.Where(m => !wanted.Contains(m.Id)))
-        {
-            ModNeed need = LobbyAdvert.ParseNeed(extra.Need);
-            if (need is ModNeed.Everyone or ModNeed.Unknown) return false;
-        }
-        return true;
+        return running.Mods.All(m => wanted.Contains(m.Id));
     }
 }

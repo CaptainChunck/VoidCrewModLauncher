@@ -68,6 +68,67 @@ public class BridgeTests
         Assert.Null(await HandshakeAsync(server.Port, hello));
     }
 
+    [Fact]
+    public async Task A_first_line_longer_than_any_hello_closes_the_connection_without_being_read_to_its_end()
+    {
+        using var server = new BridgeServer(Token);
+        Assert.True(server.Start());
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, server.Port);
+        NetworkStream stream = client.GetStream();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+        byte[] chunk = Encoding.ASCII.GetBytes(new string('x', 64 * 1024));
+        bool closed = false;
+        try
+        {
+            // A line that never ends, four times longer than the launcher reads before its hello window (10 s) is up.
+            for (int sent = 0; sent < 4 * BridgeServer.MaxHelloLength; sent += chunk.Length) await stream.WriteAsync(chunk, timeout.Token);
+            closed = await stream.ReadAsync(new byte[1], timeout.Token) == 0;
+        }
+        catch (IOException)
+        {
+            closed = true;
+        }
+        Assert.True(closed);
+        Assert.False(server.IsConnected);
+    }
+
+    [Fact]
+    public async Task Lines_are_read_up_to_a_length_and_a_longer_one_is_skipped()
+    {
+        string longLine = new('x', 40_000);
+        byte[] bytes = Encoding.UTF8.GetBytes($"first\n{longLine}\nafter\r\n\n{longLine}\nlast\npartial");
+        var reader = new LineReader(new MemoryStream(bytes));
+        Assert.Equal("first", await reader.ReadLineAsync(50_000, default));
+        // Longer than the limit (and than the reader's buffer): skipped to its end, then the next line reads as usual.
+        await Assert.ThrowsAsync<LineTooLongException>(() => reader.ReadLineAsync(30_000, default));
+        Assert.Equal("after", await reader.ReadLineAsync(30_000, default));
+        Assert.Equal("", await reader.ReadLineAsync(30_000, default));
+        Assert.Equal(longLine, await reader.ReadLineAsync(50_000, default));
+        Assert.Equal("last", await reader.ReadLineAsync(50_000, default));
+        // A last line without its line break never arrived whole.
+        Assert.Null(await reader.ReadLineAsync(50_000, default));
+    }
+
+    [Fact]
+    public async Task Characters_split_between_reads_come_out_whole()
+    {
+        const string text = "{\"name\":\"Équipage 日本語 ✓\"}";
+        var reader = new LineReader(new Trickle(Encoding.UTF8.GetBytes(text + "\n" + text + "\n")));
+        Assert.Equal(text, await reader.ReadLineAsync(100, default));
+        Assert.Equal(text, await reader.ReadLineAsync(100, default));
+        Assert.Null(await reader.ReadLineAsync(100, default));
+    }
+
+    /// <summary>A stream that gives one byte per read, as a slow socket might.</summary>
+    private sealed class Trickle(byte[] bytes) : MemoryStream(bytes)
+    {
+        public override int Read(byte[] buffer, int offset, int count) => base.Read(buffer, offset, Math.Min(count, 1));
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+            base.ReadAsync(buffer[..Math.Min(buffer.Length, 1)], cancellationToken);
+    }
+
     /// <summary>Says hello like the bridge; returns the launcher's answer, or null when it closed the connection.</summary>
     private static async Task<string?> HandshakeAsync(int port, HelloMessage hello)
     {

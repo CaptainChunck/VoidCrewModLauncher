@@ -76,6 +76,91 @@ public class FormatTests
         Assert.Null(VoidManagerModList.Decode(new byte[] { 1, 2, 3 }));
     }
 
+    // ---------------------------------------------------------------- lobby data from other players
+
+    [Fact]
+    public void An_advert_far_longer_than_any_launcher_writes_is_not_read()
+    {
+        string entry = ";Someone-Mod@1.0.0!R";
+        string longest = "vcml1" + string.Concat(Enumerable.Repeat(entry, (LobbyAdvert.MaxTextLength - 5) / entry.Length));
+        Assert.True(longest.Length <= LobbyAdvert.MaxTextLength);
+        Assert.NotNull(LobbyAdvert.Decode(longest));
+        Assert.Null(LobbyAdvert.Decode(longest + new string('x', LobbyAdvert.MaxTextLength)));
+    }
+
+    [Fact]
+    public void An_advert_is_read_up_to_its_mod_limit()
+    {
+        string many = "vcml1" + string.Concat(Enumerable.Range(0, 500).Select(i => $";M{i}@1!R"));
+        Assert.True(many.Length <= LobbyAdvert.MaxTextLength);
+        List<AdvertMod> mods = LobbyAdvert.Decode(many)!;
+        Assert.Equal(LobbyAdvert.MaxMods, mods.Count);
+        Assert.Equal("M0", mods[0].Id);
+    }
+
+    [Fact]
+    public void Advert_entries_with_overlong_ids_or_versions_are_left_out()
+    {
+        string id = new('a', LobbyAdvert.MaxIdLength);
+        string version = new('1', LobbyAdvert.MaxVersionLength);
+        string text = $"vcml1;{id}@1.0!R;{id}b@1.0!R;#Local@{version}!C;#Other@{version}1!C;Fine-Mod@2.0!H";
+        Assert.Equal(new[] { id, "Local", "Fine-Mod" }, LobbyAdvert.Decode(text)!.Select(m => m.Id));
+    }
+
+    [Fact]
+    public void Names_from_other_players_lose_control_and_direction_characters()
+    {
+        // A right-to-left override makes "Evil\u202Egnp.exe" show as "Evilexe.png"; a bell, a line break and isolates
+        // would break the line it is shown or logged on.
+        string text = "vcml1;#Evil\u202Egnp.exe@1.0\u200F!R:jack.\u2066evil\u2069;Some\u0007one-Mod\n@2.0!C";
+        List<AdvertMod> mods = LobbyAdvert.Decode(text)!;
+        Assert.Equal(new[] { "Evilgnp.exe", "Someone-Mod" }, mods.Select(m => m.Id));
+        Assert.Equal(new[] { "1.0", "2.0" }, mods.Select(m => m.Version));
+        Assert.Equal(new[] { "jack.evil" }, mods[0].PluginGuids);
+        Assert.Equal(ModNeed.Everyone, mods[0].Need);
+        Assert.Equal(ModNeed.ClientOnly, mods[1].Need);
+
+        string plain = "Void Crew Fleet (日本語, Ελληνικά, \u05E2\u05D1\u05E8\u05D9\u05EA)";
+        Assert.Same(plain, LobbyAdvert.CleanName(plain));
+        Assert.Equal("", LobbyAdvert.CleanName(null!));
+
+        byte[] list = VoidManagerModList.Encode("1.2.11\u202E", new[] { new VoidManagerMod("Max\u202E Players\r\n", "Voi\u200Ed.Max", "1.1.2\u0000", 30, "Nihility\u2067Shift/Max") });
+        (string Version, List<VoidManagerMod> Mods) read = VoidManagerModList.Decode(list)!.Value;
+        Assert.Equal("1.2.11", read.Version);
+        Assert.Equal(new VoidManagerMod("Max Players", "Void.Max", "1.1.2", 30, "NihilityShift/Max"), read.Mods.Single());
+
+        // The room's name too, as the launcher shows and logs it.
+        Lobby lobby = LobbyReader.Read(new RoomDto { Id = "R", Name = "[Mods Required] Fun\u202E room\u0007" }, "eu", Packages.Index());
+        Assert.Equal("Fun room", lobby.Name);
+    }
+
+    [Fact]
+    public void A_VoidManager_list_is_read_within_limits()
+    {
+        // An entry with an over-long name, GUID, version or id is left out; the rest of the list still reads.
+        string longName = new('n', LobbyAdvert.MaxIdLength + 1);
+        byte[] data = VoidManagerModList.Encode("1.2.11", new[]
+        {
+            new VoidManagerMod(longName, "a.guid", "1.0.0", 30, ""),
+            new VoidManagerMod("Long GUID", new string('g', LobbyAdvert.MaxGuidLength + 1), "1.0.0", 30, ""),
+            new VoidManagerMod("Long version", "c.guid", new string('1', LobbyAdvert.MaxVersionLength + 1), 30, ""),
+            new VoidManagerMod("Long id", "d.guid", "1.0.0", 30, new string('i', LobbyAdvert.MaxIdLength + 1)),
+            new VoidManagerMod("Max Players", "VoidCrewModdingTeam.MaxPlayers", "1.1.2", 30, ""),
+        });
+        Assert.Equal(new[] { "Max Players" }, VoidManagerModList.Decode(data)!.Value.Mods.Select(m => m.Name));
+        Assert.Null(VoidManagerModList.Decode(VoidManagerModList.Encode(new string('9', LobbyAdvert.MaxVersionLength + 1), Array.Empty<VoidManagerMod>())));
+
+        // A list bigger than any real one isn't read at all, as bytes or as the base64 the bridge sends.
+        VoidManagerMod filler = new(new string('n', 150), "x.guid", "1.0.0", 30, new string('i', 150));
+        byte[] fits = VoidManagerModList.Encode("1.2.11", Enumerable.Repeat(filler, LobbyAdvert.MaxVoidManagerListBytes / 320));
+        Assert.True(fits.Length <= LobbyAdvert.MaxVoidManagerListBytes);
+        Assert.NotNull(VoidManagerModList.Decode(Convert.ToBase64String(fits)));
+        byte[] tooBig = VoidManagerModList.Encode("1.2.11", Enumerable.Repeat(filler, LobbyAdvert.MaxVoidManagerListBytes / 300));
+        Assert.True(tooBig.Length > LobbyAdvert.MaxVoidManagerListBytes);
+        Assert.Null(VoidManagerModList.Decode(tooBig));
+        Assert.Null(VoidManagerModList.Decode(Convert.ToBase64String(tooBig)));
+    }
+
     [Theory]
     [InlineData("BepInEx-BepInExPack-5.4.2305", "BepInEx", "BepInExPack", "5.4.2305")]
     [InlineData("Captain_Chuncks_Mods-Void_Crew_Fleet-0.3.0", "Captain_Chuncks_Mods", "Void_Crew_Fleet", "0.3.0")]

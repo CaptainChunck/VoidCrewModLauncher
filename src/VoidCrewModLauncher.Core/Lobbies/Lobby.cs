@@ -76,12 +76,15 @@ public sealed class Lobby
 
     public string Id => Room.Id;
 
-    /// <summary>The room name without the "[Mods Required]" VoidManager puts in front of it.</summary>
+    /// <summary>
+    /// The room name without the "[Mods Required]" VoidManager puts in front of it, and without the characters
+    /// <see cref="LobbyAdvert.CleanName"/> removes (the host typed it; the launcher shows and logs it).
+    /// </summary>
     public string Name
     {
         get
         {
-            string name = Room.Name ?? "";
+            string name = LobbyAdvert.CleanName(Room.Name ?? "");
             const string required = "[Mods Required]";
             if (name.StartsWith(required, StringComparison.OrdinalIgnoreCase)) name = name[required.Length..].TrimStart();
             return name.Length == 0 ? Loc.T("Unnamed lobby") : name;
@@ -134,18 +137,42 @@ public static class LobbyReader
         if (voidManager != null)
         {
             if (source == LobbyModSource.None) source = LobbyModSource.VoidManager;
+            // The mods so far by plugin GUID, package and simplified name, each the first in the list with it: VoidManager's
+            // list can be long (it comes from another player), so each of its entries is one lookup, not scans of the list.
+            var byGuid = new Dictionary<string, LobbyMod>(StringComparer.OrdinalIgnoreCase);
+            var byPackage = new Dictionary<TsPackage, int>();
+            var byName = new Dictionary<string, int>(StringComparer.Ordinal);
+            void Remember(LobbyMod mod, int at)
+            {
+                foreach (string guid in mod.PluginGuids) byGuid.TryAdd(guid, mod);
+                if (mod.Package != null) byPackage.TryAdd(mod.Package, at);
+                byName.TryAdd(PackageIndex.Simplify(mod.Name), at);
+            }
+            for (int i = 0; i < mods.Count; i++) Remember(mods[i], i);
+
             foreach (VoidManagerMod mod in voidManager.Value.Mods)
             {
                 if (mod.MultiplayerType == 0 || mod.Guid == BridgeDefaults.PluginGuid) continue;
-                TsPackage? package = index.Find(mod.DownloadId) ?? index.FindByName(mod.Name);
                 ModNeed need = LobbyAdvert.FromVoidManagerType(mod.MultiplayerType);
-                LobbyMod? same = mods.FirstOrDefault(m => m.PluginGuids.Contains(mod.Guid, StringComparer.OrdinalIgnoreCase))
-                                 ?? mods.FirstOrDefault(m => (package != null && m.Package == package) || PackageIndex.Simplify(m.Name) == PackageIndex.Simplify(mod.Name));
+                TsPackage? package = null;
+                LobbyMod? same = byGuid.GetValueOrDefault(mod.Guid);
+                if (same == null)
+                {
+                    // Else the first with its package or its name.
+                    package = index.Find(mod.DownloadId) ?? index.FindByName(mod.Name);
+                    int first = package != null && byPackage.TryGetValue(package, out int withPackage) ? withPackage : int.MaxValue;
+                    if (byName.TryGetValue(PackageIndex.Simplify(mod.Name), out int withName) && withName < first) first = withName;
+                    if (first != int.MaxValue) same = mods[first];
+                }
                 if (same != null)
                 {
-                    if (!string.IsNullOrEmpty(mod.Guid) && !same.PluginGuids.Contains(mod.Guid, StringComparer.OrdinalIgnoreCase)) same.PluginGuids.Add(mod.Guid);
+                    if (!string.IsNullOrEmpty(mod.Guid) && !same.PluginGuids.Contains(mod.Guid, StringComparer.OrdinalIgnoreCase))
+                    {
+                        same.PluginGuids.Add(mod.Guid);
+                        byGuid.TryAdd(mod.Guid, same);
+                    }
                     // VoidManager turns away joining players without an "All" mod, whatever the advert says (a host before
-                    // launcher 0.8.1 could pick less on the HOST tab).
+                    // launcher 0.8.2 could pick less on the HOST tab).
                     if (need == ModNeed.Everyone || (!same.NeedFromHost && need != ModNeed.Unknown))
                     {
                         same.Need = need;
@@ -156,7 +183,7 @@ public static class LobbyReader
                 // The launcher's advert already lists every mod of the launch; VoidManager's extra entries are plugins
                 // inside those packages.
                 if (advert != null) continue;
-                mods.Add(new LobbyMod
+                var added = new LobbyMod
                 {
                     Name = mod.Name,
                     PluginGuids = { mod.Guid },
@@ -166,13 +193,15 @@ public static class LobbyReader
                     PackageId = package?.FullName ?? PackageIndex.NormalizeId(mod.DownloadId),
                     Package = package,
                     PackageVersion = package?.Version(mod.Version),
-                });
+                };
+                mods.Add(added);
+                Remember(added, mods.Count - 1);
             }
         }
 
         // Once the host has a VoidManager "All" mod (VoidManager puts "[Mods Required]" in front of the room name then),
         // VoidManager turns away joining players who don't run it, so everyone needs VoidManager itself. It isn't in its
-        // own list, and hosts before launcher 0.8.1 advertised it as a library only.
+        // own list, and hosts before launcher 0.8.2 advertised it as a library only.
         bool voidManagerChecks = voidManager?.Mods.Any(m => m.MultiplayerType == (byte)VoidManagerType.All) == true
                                  || (room.Name ?? "").StartsWith("[Mods Required]", StringComparison.OrdinalIgnoreCase);
         if (voidManagerChecks)

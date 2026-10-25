@@ -152,22 +152,77 @@ public class LobbyTests : IDisposable
         Assert.Contains(plan.Kept, m => m.Id == "VoidCrewModdingTeam-Pilot_HUD");
     }
 
+    /// <summary>A launch.json listing these mods, as the launcher writes it.</summary>
+    private static LaunchFile Running(params (string Id, string Version, ModNeed Need)[] mods) => new()
+    {
+        Mods = mods.Select(m => new LaunchMod { Id = m.Id, Version = m.Version, Need = LobbyAdvert.NeedLetter(m.Need) }).ToList(),
+    };
+
     [Fact]
     public void Running_game_fits_when_it_has_the_same_mods()
     {
         var join = new ResolvedJoin();
         join.Mods.Add(new RuntimeMod("A-Mod", "Mod", "1.0.0", "x", false, ModNeed.Everyone));
-        LaunchFile Running(params (string Id, string Version, ModNeed Need)[] mods) => new()
-        {
-            Mods = mods.Select(m => new LaunchMod { Id = m.Id, Version = m.Version, Need = LobbyAdvert.NeedLetter(m.Need) }).ToList(),
-        };
+        join.Mods.Add(new RuntimeMod("B-Hud", "Hud", "2.0.0", "y", false, ModNeed.ClientOnly));
 
-        Assert.True(JoinPlanner.RunningGameFits(join, Running(("A-Mod", "1.0.0", ModNeed.Everyone))));
         Assert.True(JoinPlanner.RunningGameFits(join, Running(("A-Mod", "1.0.0", ModNeed.Everyone), ("B-Hud", "2.0.0", ModNeed.ClientOnly))));
-        Assert.False(JoinPlanner.RunningGameFits(join, Running(("A-Mod", "1.0.1", ModNeed.Everyone))));
-        Assert.False(JoinPlanner.RunningGameFits(join, Running(("A-Mod", "1.0.0", ModNeed.Everyone), ("C-Gameplay", "1.0.0", ModNeed.Everyone))));
+        Assert.False(JoinPlanner.RunningGameFits(join, Running(("A-Mod", "1.0.1", ModNeed.Everyone), ("B-Hud", "2.0.0", ModNeed.ClientOnly))));
+        Assert.False(JoinPlanner.RunningGameFits(join, Running(("A-Mod", "1.0.0", ModNeed.Everyone))));
+        // Any other mod the game runs means a restart, whoever needs it: the JOIN dialog says it's off for this game.
+        Assert.False(JoinPlanner.RunningGameFits(join, Running(("A-Mod", "1.0.0", ModNeed.Everyone), ("B-Hud", "2.0.0", ModNeed.ClientOnly), ("C-Gameplay", "1.0.0", ModNeed.Everyone))));
+        Assert.False(JoinPlanner.RunningGameFits(join, Running(("A-Mod", "1.0.0", ModNeed.Everyone), ("B-Hud", "2.0.0", ModNeed.ClientOnly), ("D-Scoop", "1.0.0", ModNeed.Session))));
+        Assert.False(JoinPlanner.RunningGameFits(join, Running(("A-Mod", "1.0.0", ModNeed.Everyone), ("B-Hud", "2.0.0", ModNeed.ClientOnly), ("E-Skin", "1.0.0", ModNeed.ClientOnly))));
         Assert.False(JoinPlanner.RunningGameFits(join, Running()));
         Assert.False(JoinPlanner.RunningGameFits(join, null));
+    }
+
+    [Fact]
+    public void Joining_restarts_a_game_that_runs_a_mod_the_join_turns_off()
+    {
+        Have("NihilityShift-VoidManager", "1.2.11");
+        Have("VoidCrewModdingTeam-Pilot_HUD", "0.0.4");
+        // A VoidManager "Session" mod: joining players don't need it, but VoidManager disconnects a player who runs one
+        // from a lobby that isn't modded (and says nothing the launcher can show).
+        HaveCopy("local-grapple", "Personal Grapple", "1.0.0", new[] { "jack.voidcrew.grapple" }, enabled: true, voidManagerType: 20);
+        JoinPlan plan = _planner.Plan(LobbyReader.Read(Room(modding: "none"), "eu", _manager.Index));
+        Assert.Contains(plan.TurnedOff, m => m.Id == "local-grapple");
+        ResolvedJoin join = _planner.Resolve(plan);
+        Assert.Equal(new[] { "NihilityShift-VoidManager", "VoidCrewModdingTeam-Pilot_HUD" }, join.Mods.Select(m => m.Id).Order());
+
+        // The game as PLAY started it, with every mod that's on.
+        LaunchFile played = Running(("NihilityShift-VoidManager", "1.2.11", ModNeed.ClientOnly), ("VoidCrewModdingTeam-Pilot_HUD", "0.0.4", ModNeed.ClientOnly),
+            ("local-grapple", "1.0.0", ModNeed.Session));
+        Assert.False(JoinPlanner.RunningGameFits(join, played));
+
+        // Started again for this join: it has just what the join loads.
+        var joined = new LaunchFile { Mods = join.Mods.Select(m => new LaunchMod { Id = m.Id, Version = m.Version, Need = LobbyAdvert.NeedLetter(m.Need), Local = m.Local }).ToList() };
+        Assert.True(JoinPlanner.RunningGameFits(join, joined));
+    }
+
+    [Fact]
+    public void A_long_VoidManager_list_is_merged_entry_by_entry()
+    {
+        // Ten mods listed a hundred times each (VoidManager allows 1000 entries; the list comes from another player).
+        byte[] list = VoidManagerModList.Encode("1.2.11", Enumerable.Range(0, 1000).Select(i => new VoidManagerMod($"Mod {i % 10}", $"someone.mod{i % 10}", "1.0.0", 30, "")));
+        Lobby lobby = LobbyReader.Read(Room(voidManager: list), "eu", _manager.Index);
+        Assert.Equal(10, lobby.Mods.Count(m => !ModPolicy.IsVoidManager(m.Id)));
+        Assert.All(lobby.Mods, m => Assert.Equal(ModNeed.Everyone, m.Need));
+        Assert.Equal(new[] { "someone.mod3" }, lobby.Mods.Single(m => m.Name == "Mod 3").PluginGuids);
+
+        // An advert's mods take VoidManager's entries for them by GUID, package or name; the others are left out.
+        string advert = LobbyAdvert.Encode(new[]
+        {
+            new AdvertMod { Id = "VoidCrewModdingTeam-Max_Players", Version = "1.1.2", Need = ModNeed.HostOnly },
+            new AdvertMod { Id = "Mod 4", Version = "1.0.0", Need = ModNeed.HostOnly, Local = true },
+        });
+        byte[] withMaxPlayers = VoidManagerModList.Encode("1.2.11", Enumerable.Range(0, 1000).Select(i => i % 3 == 0
+            ? new VoidManagerMod("Max Players", "VoidCrewModdingTeam.MaxPlayers", "1.1.2", 30, "")
+            : new VoidManagerMod($"Mod {i % 10}", $"someone.mod{i % 10}", "1.0.0", 30, "")));
+        Lobby advertised = LobbyReader.Read(Room(advert, withMaxPlayers), "eu", _manager.Index);
+        Assert.Equal(new[] { "Mod 4", "Max_Players", "VoidManager" }.Order(), advertised.Mods.Select(m => m.Package?.Name ?? m.Name).Order());
+        Assert.Equal(new[] { "VoidCrewModdingTeam.MaxPlayers" }, advertised.Mods.Single(m => m.Id == "VoidCrewModdingTeam-Max_Players").PluginGuids);
+        Assert.Equal(new[] { "someone.mod4" }, advertised.Mods.Single(m => m.Name == "Mod 4").PluginGuids);
+        Assert.All(advertised.Mods, m => Assert.Equal(ModNeed.Everyone, m.Need));
     }
 
     // ---------------------------------------------------------------- the host's local mods
@@ -188,7 +243,7 @@ public class LobbyTests : IDisposable
         return mod;
     }
 
-    /// <summary>A host running Fleet and a local copy of Jack's particle cannon (as launcher 0.8.1 advertises it, with its GUID).</summary>
+    /// <summary>A host running Fleet and a local copy of Jack's particle cannon (as launcher 0.8.2 advertises it, with its GUID).</summary>
     private static string CannonAdvert(string version = "1.38.0", params string[] guids) => LobbyAdvert.Encode(new[]
     {
         new AdvertMod { Id = "Captain_Chuncks_Mods-Void_Crew_Fleet", Version = "0.3.0", Need = ModNeed.Everyone },
@@ -308,7 +363,7 @@ public class LobbyTests : IDisposable
     [Fact]
     public void VoidManager_all_type_in_the_room_beats_the_advert()
     {
-        // A host before 0.8.1 who picked "Only the host runs it" for a mod VoidManager checks on everyone.
+        // A host before 0.8.2 who picked "Only the host runs it" for a mod VoidManager checks on everyone.
         string advert = "vcml1;VoidCrewModdingTeam-Max_Players@1.1.2!H;NihilityShift-VoidManager@1.2.11!C";
         byte[] list = VoidManagerModList.Encode("1.2.11", new[] { new VoidManagerMod("Max Players", "VoidCrewModdingTeam.MaxPlayers", "1.1.2", 30, "") });
         Lobby lobby = LobbyReader.Read(Room(advert, list), "eu", _manager.Index);

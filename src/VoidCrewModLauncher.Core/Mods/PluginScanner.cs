@@ -61,9 +61,10 @@ public static class PluginScanner
                 plugins = plugins.Select(p => p with { VoidManagerType = type }).ToList();
             }
         }
-        catch (Exception e) when (e is BadImageFormatException or InvalidOperationException or IOException)
+        catch (Exception e) when (e is BadImageFormatException or InvalidOperationException or IOException or UnauthorizedAccessException)
         {
-            // Native DLLs and other files that aren't .NET assemblies.
+            // Native DLLs and other files that aren't .NET assemblies, and files Windows won't let the launcher read (it
+            // reads the store's DLLs at start-up: one of those mustn't stop it starting).
         }
         return plugins;
     }

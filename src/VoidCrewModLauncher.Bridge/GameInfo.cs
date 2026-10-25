@@ -368,13 +368,15 @@ namespace VoidCrewModLauncher.Bridge
                 }
             }
 
+            // The host's game sets both: one far bigger than any real list is left out rather than sent to the launcher with
+            // every lobby list (the launcher wouldn't read it either).
             object mods;
-            if (info.CustomProperties.TryGetValue(VoidManagerModsKey, out mods) && mods is byte[])
+            if (info.CustomProperties.TryGetValue(VoidManagerModsKey, out mods) && mods is byte[] && ((byte[])mods).Length <= LobbyAdvert.MaxVoidManagerListBytes)
             {
                 dto.VoidManagerMods = Convert.ToBase64String((byte[])mods);
             }
             object advert;
-            if (info.CustomProperties.TryGetValue(LobbyAdvert.PropertyKey, out advert) && advert is string)
+            if (info.CustomProperties.TryGetValue(LobbyAdvert.PropertyKey, out advert) && advert is string && ((string)advert).Length <= LobbyAdvert.MaxTextLength)
             {
                 dto.Advert = (string)advert;
             }

@@ -183,6 +183,51 @@ public class ModNeedTests
         Assert.Equal(ModNeed.Session, service.CurrentHostNeeds().Auto(warzone));
     }
 
+    [Fact]
+    public async Task Hosting_from_the_running_game_restarts_it_when_a_HOST_tab_choice_changed_since_it_started()
+    {
+        using var temp = new TempFolder();
+        using var service = new LauncherService(temp.AppPaths(), new FakeHttp());
+        void Add(string id, string name, string version, int type)
+        {
+            Directory.CreateDirectory(service.Store.VersionDirectory(id, version));
+            service.Library.AddOrReplace(new InstalledMod { Id = id, Source = ModSource.Local, Name = name, Version = version, VoidManagerType = type });
+        }
+        Add("local-hud", "My HUD", "1.0.0", 8);
+        Add("local-scoop", "My Scoop", "1.0.0", 14);
+        Add("local-warzone", "Warzone", "1.0.0", 20);
+        // launch.json as LaunchWithAsync writes it: the bridge reads it once, when the game starts.
+        static LaunchFile Launch(List<RuntimeMod> mods) => new()
+        {
+            LaunchId = "play",
+            Mods = mods.Select(m => new LaunchMod { Id = m.Id, Name = m.Name, Version = m.Version, Need = LobbyAdvert.NeedLetter(m.Need), NeedSetByUser = m.NeedSetByUser, Local = m.Local }).ToList(),
+        };
+        service.UseLaunch(Launch(await service.PlayModsAsync()));
+        Assert.True(service.RunningGameHosts(await service.PlayModsAsync()));
+
+        // Changed on the HOST tab after the game started: its lobby would still list the old choice.
+        service.Settings.Host.ModNeeds["local-hud"] = ModNeed.Everyone;
+        Assert.False(service.RunningGameHosts(await service.PlayModsAsync()));
+        // Picked as what Auto says: the bridge still reads it differently (the host's choice beats the mod's own type).
+        service.Settings.Host.ModNeeds["local-hud"] = ModNeed.ClientOnly;
+        Assert.False(service.RunningGameHosts(await service.PlayModsAsync()));
+        service.Settings.Host.ModNeeds.Remove("local-hud");
+        Assert.True(service.RunningGameHosts(await service.PlayModsAsync()));
+
+        // The game turned out to require Warzone of joining players when you hosted: the running game lists it for
+        // everyone already, so the HOST tab now saying so too needs no restart.
+        Assert.True(service.RememberCheckedMods(new AdvertMessage { Required = new List<string> { "local-warzone" } }));
+        Assert.Equal(ModNeed.Everyone, (await service.PlayModsAsync()).Single(m => m.Id == "local-warzone").Need);
+        Assert.True(service.RunningGameHosts(await service.PlayModsAsync()));
+
+        // Another version or another mod, as before.
+        Add("local-scoop", "My Scoop", "1.1.0", 14);
+        Assert.False(service.RunningGameHosts(await service.PlayModsAsync()));
+        Add("local-scoop", "My Scoop", "1.0.0", 14);
+        Add("local-camera", "My Camera", "1.0.0", 8);
+        Assert.False(service.RunningGameHosts(await service.PlayModsAsync()));
+    }
+
     // ---------------------------------------------------------------- reading the type from DLLs
 
     [Fact]

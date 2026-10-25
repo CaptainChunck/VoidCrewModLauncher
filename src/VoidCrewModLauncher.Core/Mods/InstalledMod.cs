@@ -70,7 +70,7 @@ public sealed class InstalledMod
     /// <summary>
     /// The strictest VoidManager multiplayer type of the mod's plugins, read from its DLLs (<see cref="Protocol.VoidManagerType"/>
     /// as a number: 30 All ... 4 Unmanaged when none registers with VoidManager). Null when it isn't known: not read yet
-    /// (mods installed before 0.8.1 are read at start-up), or a plugin decides while the game runs.
+    /// (mods installed before 0.8.2 are read at start-up), or a plugin decides while the game runs.
     /// </summary>
     public int? VoidManagerType { get; set; }
 

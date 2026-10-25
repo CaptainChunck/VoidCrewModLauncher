@@ -68,7 +68,7 @@ namespace VoidCrewModLauncher.Protocol
     /// The launcher's lobby advert: the host's mods, with Thunderstore ids, versions and what joiners need, in one short
     /// room property ("VCML") that the game lists in the lobby so anyone browsing sees it before joining.
     /// Format: <c>vcml1;Namespace-Name@1.2.3!R;#LocalMod@1.0!R:plugin.guid,other.guid</c>. Thunderstore names never
-    /// contain ; @ ! or #. A local mod's plugin GUIDs follow its need letter after a colon (launcher 0.8.1 and later):
+    /// contain ; @ ! or #. A local mod's plugin GUIDs follow its need letter after a colon (launcher 0.8.2 and later):
     /// older launchers read only the letter, so they still read the rest of the advert as before.
     /// </summary>
     public static class LobbyAdvert
@@ -85,6 +85,25 @@ namespace VoidCrewModLauncher.Protocol
         /// <summary>Plugin GUIDs per mod, and their length: the advert comes from another player.</summary>
         public const int MaxGuids = 8;
         public const int MaxGuidLength = 100;
+
+        /// <summary>
+        /// The longest advert a reader takes: a few times what launchers write, so a longer advert from a newer launcher
+        /// still reads, but not whatever another player puts in the room property. Longer text isn't read at all.
+        /// </summary>
+        public const int MaxTextLength = 4 * MaxLength;
+
+        /// <summary>
+        /// The longest mod id (a local mod's name) and version a reader takes; real ones are far shorter. An entry with a
+        /// longer one is left out.
+        /// </summary>
+        public const int MaxIdLength = 200;
+        public const int MaxVersionLength = 64;
+
+        /// <summary>
+        /// The biggest VoidManager mod list (room property "Mods") the bridge passes on and the launcher reads. A real one
+        /// is about 100 bytes a mod; a bigger one is someone filling the property, and is left out.
+        /// </summary>
+        public const int MaxVoidManagerListBytes = 64 * 1024;
 
         public static string Encode(IEnumerable<AdvertMod> mods)
         {
@@ -115,16 +134,21 @@ namespace VoidCrewModLauncher.Protocol
             return clean.Count == 0 ? "" : ":" + string.Join(",", clean.ToArray());
         }
 
-        /// <summary>Reads an advert; returns null when the text isn't one (another mod's property, or a newer format).</summary>
+        /// <summary>
+        /// Reads an advert; returns null when the text isn't one (another mod's property, a newer format, or far longer
+        /// than an advert). It comes from another player, so it is read within limits: at most <see cref="MaxMods"/> mods,
+        /// none with an over-long id or version, and without the characters <see cref="CleanName"/> removes, before the
+        /// launcher shows or logs any of it.
+        /// </summary>
         public static List<AdvertMod> Decode(string text)
         {
-            if (string.IsNullOrEmpty(text)) return null;
+            if (string.IsNullOrEmpty(text) || text.Length > MaxTextLength) return null;
             string[] parts = text.Split(';');
             if (parts[0] != Header) return null;
             var mods = new List<AdvertMod>();
-            for (int i = 1; i < parts.Length; i++)
+            for (int i = 1; i < parts.Length && mods.Count < MaxMods; i++)
             {
-                string part = parts[i];
+                string part = CleanName(parts[i]);
                 if (part.Length == 0) continue;
                 var mod = new AdvertMod { Need = ModNeed.Unknown };
                 if (part[0] == '#')
@@ -151,9 +175,36 @@ namespace VoidCrewModLauncher.Protocol
                     mod.Id = part;
                     mod.Version = "";
                 }
-                if (mod.Id.Length > 0) mods.Add(mod);
+                if (mod.Id.Length > 0 && mod.Id.Length <= MaxIdLength && mod.Version.Length <= MaxVersionLength) mods.Add(mod);
             }
             return mods;
+        }
+
+        /// <summary>
+        /// Text from another player's lobby without control characters and the invisible marks that change the direction
+        /// of text (Unicode's bidirectional embeddings, overrides, isolates and direction marks), which could make one name
+        /// look like another or scramble the line it is shown or logged on. Returns the same string when there is nothing
+        /// to remove.
+        /// </summary>
+        public static string CleanName(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return value ?? "";
+            StringBuilder text = null;
+            for (int i = 0; i < value.Length; i++)
+            {
+                char c = value[i];
+                bool hidden = char.IsControl(c) || c == '\u061C' || c == '\u200E' || c == '\u200F' ||
+                              (c >= '\u202A' && c <= '\u202E') || (c >= '\u2066' && c <= '\u2069');
+                if (!hidden)
+                {
+                    if (text != null) text.Append(c);
+                }
+                else if (text == null)
+                {
+                    text = new StringBuilder(value.Length).Append(value, 0, i);
+                }
+            }
+            return text == null ? value : text.ToString();
         }
 
         public static ModNeed ParseNeed(string letter)
