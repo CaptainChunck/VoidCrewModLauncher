@@ -1,5 +1,9 @@
 ﻿# Changelog
 
+## 0.9.3
+
+- **Void Crew VR includes UUVR:** from version 4.0.0 the VR mod (Void Crew VR UI Fix on Thunderstore) starts VR itself, so the launcher no longer installs UUVR for it, and leaves UUVR out of its launches, your copy from Rai Pal too, as both would start VR. Older versions of the VR mod still get UUVR as before.
+
 ## 0.9.2
 
 - **Join and host errors from the game are shown in your language** (older launchers still get the English text), and hosting tells you straight away when Void Crew couldn't open the lobby, instead of after 45 seconds.
