@@ -790,6 +790,15 @@ public partial class MainViewModel : ObservableObject
             return false;
         }
 
+        if (!Dialogs.Confirm(Loc.T("Launcher update"),
+                Loc.F("Void Crew Mod Launcher {0} is out (you have {1}). The launcher closes while it updates and opens again.", release.Version, AppInfo.Version),
+                Loc.T("UPDATE"), Loc.T("LATER")))
+        {
+            AppLog.Info($"Launcher {release.Version} is out; the player chose to update later.");
+            SetStatus(Loc.F("Launcher {0} is out. CHECK FOR UPDATES on the SETTINGS tab installs it.", release.Version));
+            return false;
+        }
+
         // Busy from the download window until the launcher closes: nothing else starts meanwhile.
         if (!TryClaimBusy())
         {

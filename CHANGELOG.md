@@ -1,5 +1,9 @@
 ﻿# Changelog
 
+## 0.8.1
+
+- A new launcher version is no longer installed straight away: a window says it is out, with UPDATE and LATER. LATER asks again next time the launcher starts; CHECK FOR UPDATES on the SETTINGS tab installs it any time.
+
 ## 0.8.0
 
 - **The launcher speaks 12 languages**, the same as Void Crew: English, French, German, Spanish, Italian, Polish, Portuguese (Brazil), Russian, Ukrainian, Chinese (Simplified), Japanese and Korean. It starts in your Windows language (English when that isn't one of them); LANGUAGE on the SETTINGS tab changes it and restarts the launcher. Mod names and descriptions stay as their authors wrote them, and the launcher's log stays in English.
