@@ -93,7 +93,11 @@
                                             </TextBlock>
                                             <TextBlock Text="{Binding Author}" FontSize="12" Foreground="{StaticResource TextMuted}" />
                                         </StackPanel>
-                                        <ComboBox Grid.Column="1" ItemsSource="{Binding Options}" SelectedItem="{Binding Selected}" DisplayMemberPath="Label" VerticalAlignment="Center" />
+                                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                            <ComboBox ItemsSource="{Binding Options}" SelectedItem="{Binding Selected}" DisplayMemberPath="Label" />
+                                            <TextBlock Text="{i:T 'Players can\'t join without it'}" FontSize="12" Foreground="{StaticResource Orange}" TextWrapping="Wrap" Margin="2,4,0,0"
+                                                       Visibility="{Binding Overridden, Converter={StaticResource Show}}" />
+                                        </StackPanel>
                                     </Grid>
                                 </Border>
                             </DataTemplate>

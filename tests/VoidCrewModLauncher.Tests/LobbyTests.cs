@@ -106,7 +106,11 @@ public class LobbyTests : IDisposable
         JoinPlan plan = _planner.Plan(lobby);
         Assert.True(plan.Lines.Single(l => l.Mod.Id == "VoidCrewModdingTeam-Max_Players").Include);
         Assert.Equal(LobbyModStatus.NotNeeded, plan.Lines.Single(l => l.Mod.Id == "NihilityShift-Improved_Scoop").Status);
-        Assert.Equal(LobbyModStatus.NotNeeded, plan.Lines.Single(l => l.Mod.Id == "NihilityShift-VoidManager").Status);
+        // With an "All" mod in the room, VoidManager turns away players who don't run it: everyone needs it too.
+        JoinPlanLine voidManager = plan.Lines.Single(l => l.Mod.Id == "NihilityShift-VoidManager");
+        Assert.Equal(ModNeed.Everyone, voidManager.Mod.Need);
+        Assert.True(voidManager.Include);
+        Assert.Equal("1.2.11", voidManager.Version?.VersionNumber);
 
         ResolvedJoin join = _planner.Resolve(plan);
         Assert.Contains(join.Mods, m => m.Id == "VoidCrewModdingTeam-Max_Players");
@@ -122,9 +126,9 @@ public class LobbyTests : IDisposable
         string advert = LobbyAdvert.Encode(new[] { new AdvertMod { Id = "VoidCrewModdingTeam-Pilot_HUD", Version = "0.0.4", Need = ModNeed.Unknown } });
         byte[] list = VoidManagerModList.Encode("1.2.11", new[] { new VoidManagerMod("Pilot HUD", "pilot.hud", "0.0.4", 30, "") });
         Lobby lobby = LobbyReader.Read(Room(advert, list), "eu", _manager.Index);
-        LobbyMod mod = Assert.Single(lobby.Mods);
+        LobbyMod mod = Assert.Single(lobby.Mods, m => !ModPolicy.IsVoidManager(m.Id));
         Assert.Equal(ModNeed.Everyone, mod.Need);
-        Assert.Equal("pilot.hud", mod.Guid);
+        Assert.Equal(new[] { "pilot.hud" }, mod.PluginGuids);
     }
 
     [Fact]
@@ -164,6 +168,172 @@ public class LobbyTests : IDisposable
         Assert.False(JoinPlanner.RunningGameFits(join, Running(("A-Mod", "1.0.0", ModNeed.Everyone), ("C-Gameplay", "1.0.0", ModNeed.Everyone))));
         Assert.False(JoinPlanner.RunningGameFits(join, Running()));
         Assert.False(JoinPlanner.RunningGameFits(join, null));
+    }
+
+    // ---------------------------------------------------------------- the host's local mods
+
+    /// <summary>A mod with these plugin GUIDs in the library and the store: added from your PC, unless another source is given.</summary>
+    private InstalledMod HaveCopy(string id, string name, string version, string[] guids, bool enabled = false, int? voidManagerType = null,
+        ModSource source = ModSource.Local, JoinBehaviour joining = JoinBehaviour.Auto)
+    {
+        string folder = _manager.Store.VersionDirectory(id, version);
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, "Plugin.dll"), id);
+        var mod = new InstalledMod
+        {
+            Id = id, Name = name, Version = version, Source = source, PluginGuids = guids.ToList(), Enabled = enabled,
+            VoidManagerType = voidManagerType, WhenJoining = joining,
+        };
+        _manager.Library.AddOrReplace(mod);
+        return mod;
+    }
+
+    /// <summary>A host running Fleet and a local copy of Jack's particle cannon (as launcher 0.8.1 advertises it, with its GUID).</summary>
+    private static string CannonAdvert(string version = "1.38.0", params string[] guids) => LobbyAdvert.Encode(new[]
+    {
+        new AdvertMod { Id = "Captain_Chuncks_Mods-Void_Crew_Fleet", Version = "0.3.0", Need = ModNeed.Everyone },
+        new AdvertMod { Id = "Penitence Particle Cannon", Version = version, Need = ModNeed.Everyone, Local = true, PluginGuids = guids.ToList() },
+    });
+
+    [Fact]
+    public void Host_local_mod_is_found_by_its_plugin_guid_whatever_your_copy_is_called()
+    {
+        // Added from a differently named zip on this PC, and switched off in the INSTALLED tab.
+        HaveCopy("local-ppcbuild", "PPC build", "1.38.0", new[] { "jack.voidcrew.ppc" }, enabled: false, voidManagerType: 30);
+        Lobby lobby = LobbyReader.Read(Room(CannonAdvert("1.38.0", "jack.voidcrew.ppc")), "eu", _manager.Index);
+
+        JoinPlan plan = _planner.Plan(lobby);
+        JoinPlanLine cannon = plan.Lines.Single(l => l.Mod.Local);
+        Assert.Equal(LobbyModStatus.Ready, cannon.Status);
+        Assert.True(cannon.Include);
+        Assert.Equal("local-ppcbuild", cannon.Copy?.Id);
+        Assert.Empty(plan.Warnings);
+        Assert.DoesNotContain(plan.TurnedOff, m => m.Id == "local-ppcbuild");
+
+        ResolvedJoin join = _planner.Resolve(plan);
+        RuntimeMod loaded = Assert.Single(join.Mods, m => m.Id == "local-ppcbuild");
+        Assert.True(loaded.Local);
+        Assert.Equal("1.38.0", loaded.Version);
+        Assert.Contains(join.Mods, m => m.Id == "Captain_Chuncks_Mods-Void_Crew_Fleet");
+    }
+
+    [Fact]
+    public void Missing_local_mod_says_which_one_and_that_it_cant_be_downloaded()
+    {
+        Lobby lobby = LobbyReader.Read(Room(CannonAdvert("1.38.0", "jack.voidcrew.ppc")), "eu", _manager.Index);
+        JoinPlan plan = _planner.Plan(lobby);
+        JoinPlanLine cannon = plan.Lines.Single(l => l.Mod.Local);
+        Assert.Equal(LobbyModStatus.Unavailable, cannon.Status);
+        Assert.False(cannon.Include);
+        string warning = Assert.Single(plan.Warnings);
+        Assert.Contains("Penitence Particle Cannon", warning);
+        Assert.Contains("jack.voidcrew.ppc", warning);
+        Assert.Contains("can't be downloaded", warning);
+    }
+
+    [Fact]
+    public void Local_mod_at_another_version_isnt_used()
+    {
+        HaveCopy("local-penitenceparticlecannon", "Penitence Particle Cannon", "1.37.0", new[] { "jack.voidcrew.ppc" }, enabled: true, voidManagerType: 30);
+        Lobby lobby = LobbyReader.Read(Room(CannonAdvert("1.38.0", "jack.voidcrew.ppc")), "eu", _manager.Index);
+        JoinPlan plan = _planner.Plan(lobby);
+        Assert.Equal(LobbyModStatus.Unavailable, plan.Lines.Single(l => l.Mod.Local).Status);
+        string warning = Assert.Single(plan.Warnings);
+        Assert.Contains("1.38.0", warning);
+        Assert.Contains("1.37.0", warning);
+        // Your other version stays off: VoidManager checks the version too.
+        Assert.Contains(plan.TurnedOff, m => m.Id == "local-penitenceparticlecannon");
+    }
+
+    [Fact]
+    public void Old_host_advert_without_guids_uses_VoidManager_list_or_the_name()
+    {
+        HaveCopy("local-mycannon", "My cannon", "1.38.0", new[] { "jack.voidcrew.ppc" });
+        string oldAdvert = "vcml1;Captain_Chuncks_Mods-Void_Crew_Fleet@0.3.0!R;#Penitence Particle Cannon@1.38.0!R";
+        byte[] list = VoidManagerModList.Encode("1.2.11", new[] { new VoidManagerMod("Penitence Particle Cannon", "jack.voidcrew.ppc", "1.38.0", 30, "") });
+
+        Lobby withList = LobbyReader.Read(Room(oldAdvert, list), "eu", _manager.Index);
+        Assert.Equal(new[] { "jack.voidcrew.ppc" }, withList.Mods.Single(m => m.Local).PluginGuids);
+        Assert.Equal("local-mycannon", _planner.Plan(withList).Lines.Single(l => l.Mod.Local).Copy?.Id);
+
+        // No GUID anywhere: a copy with the same name.
+        Lobby withoutList = LobbyReader.Read(Room(oldAdvert), "eu", _manager.Index);
+        Assert.Null(_planner.Plan(withoutList).Lines.Single(l => l.Mod.Local).Copy);
+        HaveCopy("local-penitenceparticlecannon", "Penitence Particle Cannon", "1.38.0", new[] { "jack.voidcrew.ppc" });
+        Assert.Equal("local-penitenceparticlecannon", _planner.Plan(withoutList).Lines.Single(l => l.Mod.Local).Copy?.Id);
+    }
+
+    [Fact]
+    public void The_same_plugin_from_Thunderstore_counts_as_your_copy()
+    {
+        HaveCopy("Jack_Modding-Penitence_Particle_Cannon", "Penitence_Particle_Cannon", "1.38.0", new[] { "jack.voidcrew.ppc" }, enabled: true, voidManagerType: 30, source: ModSource.Thunderstore);
+        Lobby lobby = LobbyReader.Read(Room(CannonAdvert("1.38.0", "jack.voidcrew.ppc")), "eu", _manager.Index);
+        JoinPlan plan = _planner.Plan(lobby);
+        Assert.Equal("Jack_Modding-Penitence_Particle_Cannon", plan.Lines.Single(l => l.Mod.Local).Copy?.Id);
+        Assert.DoesNotContain(plan.TurnedOff, m => m.Id == "Jack_Modding-Penitence_Particle_Cannon");
+        Assert.Contains(_planner.Resolve(plan).Mods, m => m.Id == "Jack_Modding-Penitence_Particle_Cannon" && !m.Local);
+    }
+
+    [Fact]
+    public void A_second_copy_of_a_plugin_the_lobby_loads_stays_off()
+    {
+        HaveCopy("local-ppc", "Penitence Particle Cannon", "1.38.0", new[] { "jack.voidcrew.ppc" }, enabled: true, voidManagerType: 30);
+        HaveCopy("local-ppcdev", "PPC dev", "1.39.0", new[] { "jack.voidcrew.ppc" }, enabled: true, voidManagerType: 30, joining: JoinBehaviour.Keep);
+        Lobby lobby = LobbyReader.Read(Room(CannonAdvert("1.38.0", "jack.voidcrew.ppc")), "eu", _manager.Index);
+        JoinPlan plan = _planner.Plan(lobby);
+        Assert.Equal("local-ppc", plan.Lines.Single(l => l.Mod.Local).Copy?.Id);
+        Assert.Contains(plan.TurnedOff, m => m.Id == "local-ppcdev");
+        Assert.DoesNotContain(_planner.Resolve(plan).Mods, m => m.Id == "local-ppcdev");
+    }
+
+    [Fact]
+    public void Your_VoidManager_checked_local_mods_stay_off_in_lobbies_without_them()
+    {
+        HaveCopy("local-ppc", "Penitence Particle Cannon", "1.38.0", new[] { "jack.voidcrew.ppc" }, enabled: true, voidManagerType: 30);
+        HaveCopy("local-uuvr", "UUVR", "0.4.0", new[] { "raicuparta.uuvr-modern" }, enabled: true, voidManagerType: 4);
+        string advert = LobbyAdvert.Encode(new[] { new AdvertMod { Id = "Captain_Chuncks_Mods-Void_Crew_Fleet", Version = "0.3.0", Need = ModNeed.Everyone } });
+
+        JoinPlan plan = _planner.Plan(LobbyReader.Read(Room(advert), "eu", _manager.Index));
+        // VoidManager would turn you away for an "All" mod the host doesn't run; a VR mod only changes your own game.
+        Assert.Contains(plan.TurnedOff, m => m.Id == "local-ppc");
+        Assert.Contains(plan.Kept, m => m.Id == "local-uuvr");
+        Assert.Empty(plan.Warnings);
+
+        _manager.Library.Update("local-ppc", m => m.WhenJoining = JoinBehaviour.Keep);
+        plan = _planner.Plan(LobbyReader.Read(Room(advert), "eu", _manager.Index));
+        Assert.Contains(plan.Kept, m => m.Id == "local-ppc");
+        Assert.Contains(plan.Warnings, w => w.Contains("Penitence Particle Cannon"));
+    }
+
+    [Fact]
+    public void VoidManager_all_type_in_the_room_beats_the_advert()
+    {
+        // A host before 0.8.1 who picked "Only the host runs it" for a mod VoidManager checks on everyone.
+        string advert = "vcml1;VoidCrewModdingTeam-Max_Players@1.1.2!H;NihilityShift-VoidManager@1.2.11!C";
+        byte[] list = VoidManagerModList.Encode("1.2.11", new[] { new VoidManagerMod("Max Players", "VoidCrewModdingTeam.MaxPlayers", "1.1.2", 30, "") });
+        Lobby lobby = LobbyReader.Read(Room(advert, list), "eu", _manager.Index);
+        Assert.Equal(ModNeed.Everyone, lobby.Mods.Single(m => m.Id == "VoidCrewModdingTeam-Max_Players").Need);
+        Assert.Equal(ModNeed.Everyone, lobby.Mods.Single(m => m.Id == "NihilityShift-VoidManager").Need);
+        Assert.All(_planner.Plan(lobby).Lines, l => Assert.True(l.Include));
+    }
+
+    [Fact]
+    public void Mods_Required_room_without_VoidManager_in_its_list_gets_VoidManager()
+    {
+        // VoidManager leaves itself out of its list; its version is in the list's header.
+        byte[] list = VoidManagerModList.Encode("1.2.10", new[] { new VoidManagerMod("Max Players", "VoidCrewModdingTeam.MaxPlayers", "1.1.2", 30, "") });
+        Lobby lobby = LobbyReader.Read(Room(voidManager: list), "eu", _manager.Index);
+        LobbyMod voidManager = lobby.Mods.Single(m => ModPolicy.IsVoidManager(m.Id));
+        Assert.Equal("NihilityShift-VoidManager", voidManager.Id);
+        Assert.Equal(ModNeed.Everyone, voidManager.Need);
+        Assert.Equal("1.2.10", voidManager.PackageVersion?.VersionNumber);
+
+        // Without an "All" mod (and so without "[Mods Required]"), joining players don't need it.
+        byte[] relaxed = VoidManagerModList.Encode("1.2.10", new[] { new VoidManagerMod("Improved Scoop", "NihilityShift.ImprovedScoop", "1.1.6", 14, "") });
+        RoomDto relaxedRoom = Room(voidManager: relaxed);
+        relaxedRoom.Name = "Captain's Room";
+        Lobby relaxedLobby = LobbyReader.Read(relaxedRoom, "eu", _manager.Index);
+        Assert.DoesNotContain(relaxedLobby.Mods, m => ModPolicy.IsVoidManager(m.Id));
     }
 
     [Fact]

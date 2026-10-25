@@ -27,6 +27,28 @@ namespace VoidCrewModLauncher.Protocol
         ClientOnly = 'C',
     }
 
+    /// <summary>VoidManager's multiplayer types (VoidManager.MPModChecks.MultiplayerType), the byte in its mod lists.</summary>
+    public enum VoidManagerType
+    {
+        /// <summary>Left out of VoidManager's lists.</summary>
+        Hidden = 0,
+
+        /// <summary>A BepInEx plugin that doesn't register with VoidManager; VoidManager doesn't check it.</summary>
+        Unmanaged = 4,
+
+        /// <summary>Only changes the player's own game.</summary>
+        Client = 8,
+
+        /// <summary>Only the host needs it.</summary>
+        Host = 14,
+
+        /// <summary>The room must be [mod_session]; joining players don't need it. VoidPlugin's default.</summary>
+        Session = 20,
+
+        /// <summary>Everyone needs it, at the same version: VoidManager turns away a joining player without it.</summary>
+        All = 30,
+    }
+
     public sealed class AdvertMod
     {
         /// <summary>Thunderstore "Namespace-Name", or a local mod's name when <see cref="Local"/> is set.</summary>
@@ -34,12 +56,20 @@ namespace VoidCrewModLauncher.Protocol
         public string Version { get; set; }
         public ModNeed Need { get; set; }
         public bool Local { get; set; }
+
+        /// <summary>
+        /// The BepInEx plugin GUIDs in a local mod: what identifies it on every PC (the launcher names a local mod after
+        /// its file on the PC it was added from). Null or empty when not known.
+        /// </summary>
+        public List<string> PluginGuids { get; set; }
     }
 
     /// <summary>
     /// The launcher's lobby advert: the host's mods, with Thunderstore ids, versions and what joiners need, in one short
     /// room property ("VCML") that the game lists in the lobby so anyone browsing sees it before joining.
-    /// Format: <c>vcml1;Namespace-Name@1.2.3!R;#LocalMod@1.0!C</c>. Thunderstore names never contain ; @ ! or #.
+    /// Format: <c>vcml1;Namespace-Name@1.2.3!R;#LocalMod@1.0!R:plugin.guid,other.guid</c>. Thunderstore names never
+    /// contain ; @ ! or #. A local mod's plugin GUIDs follow its need letter after a colon (launcher 0.8.1 and later):
+    /// older launchers read only the letter, so they still read the rest of the advert as before.
     /// </summary>
     public static class LobbyAdvert
     {
@@ -52,6 +82,10 @@ namespace VoidCrewModLauncher.Protocol
         /// <summary>And short: Photon sends listed properties in every lobby list update.</summary>
         public const int MaxLength = 2000;
 
+        /// <summary>Plugin GUIDs per mod, and their length: the advert comes from another player.</summary>
+        public const int MaxGuids = 8;
+        public const int MaxGuidLength = 100;
+
         public static string Encode(IEnumerable<AdvertMod> mods)
         {
             var text = new StringBuilder(Header);
@@ -61,11 +95,24 @@ namespace VoidCrewModLauncher.Protocol
                 if (mod == null || string.IsNullOrEmpty(mod.Id)) continue;
                 if (++count > MaxMods) break;
                 string entry = ";" + (mod.Local ? "#" : "") + Clean(mod.Id) + "@" + Clean(string.IsNullOrEmpty(mod.Version) ? "0" : mod.Version) +
-                               "!" + (char)(mod.Need == 0 ? ModNeed.Unknown : mod.Need);
+                               "!" + (char)(mod.Need == 0 ? ModNeed.Unknown : mod.Need) + GuidList(mod.PluginGuids);
                 if (text.Length + entry.Length > MaxLength) break;
                 text.Append(entry);
             }
             return text.ToString();
+        }
+
+        private static string GuidList(List<string> guids)
+        {
+            if (guids == null) return "";
+            var clean = new List<string>();
+            foreach (string guid in guids)
+            {
+                string value = CleanGuid(guid);
+                if (value.Length > 0 && value.Length <= MaxGuidLength && !clean.Contains(value)) clean.Add(value);
+                if (clean.Count == MaxGuids) break;
+            }
+            return clean.Count == 0 ? "" : ":" + string.Join(",", clean.ToArray());
         }
 
         /// <summary>Reads an advert; returns null when the text isn't one (another mod's property, or a newer format).</summary>
@@ -88,7 +135,9 @@ namespace VoidCrewModLauncher.Protocol
                 int bang = part.LastIndexOf('!');
                 if (bang >= 0)
                 {
-                    mod.Need = ParseNeed(part.Substring(bang + 1));
+                    string need = part.Substring(bang + 1);
+                    mod.Need = ParseNeed(need);
+                    if (need.Length > 2 && need[1] == ':') mod.PluginGuids = ParseGuids(need.Substring(2));
                     part = part.Substring(0, bang);
                 }
                 int at = part.LastIndexOf('@');
@@ -125,6 +174,19 @@ namespace VoidCrewModLauncher.Protocol
             return ((char)(need == 0 ? ModNeed.Unknown : need)).ToString();
         }
 
+        private static List<string> ParseGuids(string text)
+        {
+            var guids = new List<string>();
+            foreach (string part in text.Split(','))
+            {
+                string guid = part.Trim();
+                if (guid.Length == 0 || guid.Length > MaxGuidLength || guids.Contains(guid)) continue;
+                guids.Add(guid);
+                if (guids.Count == MaxGuids) break;
+            }
+            return guids;
+        }
+
         private static string Clean(string value)
         {
             var text = new StringBuilder(value.Length);
@@ -136,17 +198,46 @@ namespace VoidCrewModLauncher.Protocol
             return text.ToString().Trim();
         }
 
+        /// <summary>A plugin GUID without the characters that separate entries and GUIDs.</summary>
+        private static string CleanGuid(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return "";
+            var text = new StringBuilder(value.Length);
+            foreach (char c in value)
+            {
+                if (c == ',' || c == ':' || char.IsWhiteSpace(c)) continue;
+                text.Append(c);
+            }
+            return Clean(text.ToString());
+        }
+
         /// <summary>VoidManager's multiplayer type byte (MPModChecks.MultiplayerType) as a need.</summary>
         public static ModNeed FromVoidManagerType(int mpType)
         {
-            switch (mpType)
+            switch ((VoidManagerType)mpType)
             {
-                case 30: return ModNeed.Everyone;  // All
-                case 20: return ModNeed.Session;   // Session
-                case 14: return ModNeed.HostOnly;  // Host
-                case 8: return ModNeed.ClientOnly; // Client
-                default: return ModNeed.Unknown;   // Unmanaged (4), Hidden (0)
+                case VoidManagerType.All: return ModNeed.Everyone;
+                case VoidManagerType.Session: return ModNeed.Session;
+                case VoidManagerType.Host: return ModNeed.HostOnly;
+                case VoidManagerType.Client: return ModNeed.ClientOnly;
+                default: return ModNeed.Unknown; // Unmanaged, Hidden
             }
+        }
+
+        /// <summary>
+        /// What a lobby lists for one of its host's mods. A mod that joining players are checked for (VoidManager "All",
+        /// or one the game itself requires) is for everyone, whatever else says: without it they'd be turned away.
+        /// Otherwise the host's own choice on the HOST tab wins, then the mod's VoidManager type, then the launcher's guess.
+        /// </summary>
+        /// <param name="launcherNeed">What the launcher put in launch.json: the host's choice, or its guess.</param>
+        /// <param name="chosenByHost">The host picked <paramref name="launcherNeed"/> on the HOST tab.</param>
+        /// <param name="voidManagerNeed">The mod's VoidManager type in the running game as a need (Unknown when it has none).</param>
+        /// <param name="checkedOnJoiners">The game or VoidManager turns away a joining player without the mod.</param>
+        public static ModNeed AdvertisedNeed(ModNeed launcherNeed, bool chosenByHost, ModNeed voidManagerNeed, bool checkedOnJoiners)
+        {
+            if (checkedOnJoiners || voidManagerNeed == ModNeed.Everyone) return ModNeed.Everyone;
+            if (!chosenByHost && voidManagerNeed != ModNeed.Unknown) return voidManagerNeed;
+            return launcherNeed == 0 ? ModNeed.Unknown : launcherNeed;
         }
     }
 }

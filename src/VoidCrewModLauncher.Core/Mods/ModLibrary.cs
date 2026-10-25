@@ -74,6 +74,18 @@ public sealed class ModLibrary
         Changed?.Invoke();
     }
 
+    /// <summary>Changes any number of mods in place, saving once: <paramref name="change"/> returns true for a mod it changed.</summary>
+    public void UpdateAll(Func<InstalledMod, bool> change)
+    {
+        bool changed = false;
+        lock (_gate)
+        {
+            foreach (InstalledMod mod in _mods) changed |= change(mod);
+            if (changed) SaveLocked();
+        }
+        if (changed) Changed?.Invoke();
+    }
+
     private void SaveLocked()
     {
         try

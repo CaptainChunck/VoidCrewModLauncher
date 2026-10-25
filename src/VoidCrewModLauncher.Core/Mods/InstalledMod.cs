@@ -15,7 +15,10 @@ public enum ModSource
 /// <summary>What happens to one of your mods when you join somebody else's lobby.</summary>
 public enum JoinBehaviour
 {
-    /// <summary>Kept when it only changes your own game (client-side, VR, local mods); otherwise only if the lobby has it.</summary>
+    /// <summary>
+    /// Kept when it only changes your own game (client-side, VR, local mods that VoidManager doesn't check); otherwise
+    /// only if the lobby has it.
+    /// </summary>
     Auto,
 
     /// <summary>Always kept.</summary>
@@ -64,6 +67,13 @@ public sealed class InstalledMod
     /// <summary>BepInEx plugin GUIDs found in the mod's DLLs.</summary>
     public List<string> PluginGuids { get; set; } = new();
 
+    /// <summary>
+    /// The strictest VoidManager multiplayer type of the mod's plugins, read from its DLLs (<see cref="Protocol.VoidManagerType"/>
+    /// as a number: 30 All ... 4 Unmanaged when none registers with VoidManager). Null when it isn't known: not read yet
+    /// (mods installed before 0.8.1 are read at start-up), or a plugin decides while the game runs.
+    /// </summary>
+    public int? VoidManagerType { get; set; }
+
     public DateTime InstalledUtc { get; set; }
 
     [JsonIgnore]
@@ -74,7 +84,15 @@ public sealed class InstalledMod
 
     /// <summary>What players joining your lobby need, as the launcher guesses it (the HOST tab can override it).</summary>
     [JsonIgnore]
-    public ModNeed GuessedNeed => ModPolicy.GuessNeed(Id, Categories, IsLocal);
+    public ModNeed GuessedNeed => ModPolicy.GuessNeed(Id, Categories, IsLocal, VoidManagerType);
+
+    /// <summary>VoidManager turns away a joining player without this mod (its type is "All").</summary>
+    [JsonIgnore]
+    public bool CheckedByVoidManager => VoidManagerType == (int)Protocol.VoidManagerType.All;
+
+    /// <summary>The mod is VoidManager itself (two Thunderstore packages carry it, under the same plugin GUID).</summary>
+    [JsonIgnore]
+    public bool IsVoidManager => ModPolicy.IsVoidManager(Id) || PluginGuids.Contains(ModPolicy.VoidManagerGuid, StringComparer.OrdinalIgnoreCase);
 }
 
 /// <summary>library.json.</summary>

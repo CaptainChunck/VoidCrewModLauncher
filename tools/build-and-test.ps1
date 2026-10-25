@@ -36,6 +36,14 @@ $checks = @(
     @("MatchmakingController", "GetCachedRoomList")
 )
 $fields = @(@("MatchMakingMenu", "_roomNameField"), @("MatchMakingMenu", "_playerLimit"), @("MatchmakingController", "_cachedMatchmakingRooms"))
+# In ResourceAssets.dll: the game's own mod check, which the bridge reads to list the mods joining players need.
+$resourceAssets = Join-Path $VoidCrewDir "Void Crew_Data\Managed\ResourceAssets.dll"
+$assetChecks = @(
+    @("ResourceAssets.RuntimeAssetsRegister", "RegisterAsset"), @("ResourceAssets.RuntimeAssetsRegister", "RegisterExternalMod"),
+    @("ResourceAssets.RuntimeAssetsRegister", "AddAssetEffect"), @("ResourceAssets.RuntimeAssetsRegister", "GetRequiredAssets"),
+    @("ResourceAssets.RuntimeAssetsRegister", "GetRequiredExternalMods"), @("ResourceAssets.RuntimeAssetsRegister", "GetAsset"),
+    @("ResourceAssets.RuntimeAssetsRegister", "TryGetAssetInfo"), @("ResourceAssets.RuntimeAssetsRegister", "TryGetModInfo")
+)
 $script = @"
 using System; using System.Linq; using System.Reflection; using System.Reflection.Metadata; using System.Reflection.PortableExecutable; using System.IO;
 var reader = new PEReader(File.OpenRead(args[0])).GetMetadataReader();
@@ -60,6 +68,10 @@ Set-Content (Join-Path $check "check.csproj") '<Project Sdk="Microsoft.NET.Sdk">
 $arguments = @($assembly)
 foreach ($c in $checks) { $arguments += $c[0], $c[1], "m" }
 foreach ($f in $fields) { $arguments += $f[0], $f[1], "f" }
+dotnet run --project (Join-Path $check "check.csproj") -v:quiet -- @arguments
+if ($LASTEXITCODE -ne 0) { throw "$LASTEXITCODE game method(s) the bridge uses are gone in this Void Crew version." }
+$arguments = @($resourceAssets)
+foreach ($c in $assetChecks) { $arguments += $c[0], $c[1], "m" }
 dotnet run --project (Join-Path $check "check.csproj") -v:quiet -- @arguments
 if ($LASTEXITCODE -ne 0) { throw "$LASTEXITCODE game method(s) the bridge uses are gone in this Void Crew version." }
 Write-Output "All builds, tests and game checks passed."

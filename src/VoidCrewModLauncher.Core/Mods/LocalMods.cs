@@ -196,6 +196,7 @@ public static class LocalMods
             Description = description ?? (plugins.Count > 0 ? string.Join(", ", plugins.Select(p => $"{p.Name} {p.Version}").Distinct()) : "Added from your PC."),
             Dependencies = dependencies,
             PluginGuids = plugins.Select(p => p.Guid).Distinct().ToList(),
+            VoidManagerType = PluginScanner.StrictestType(plugins),
             Enabled = existing?.Enabled ?? true,
             WhenJoining = existing?.WhenJoining ?? JoinBehaviour.Auto,
             InstalledUtc = DateTime.UtcNow,

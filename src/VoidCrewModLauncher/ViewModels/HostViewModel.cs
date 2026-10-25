@@ -19,18 +19,20 @@ public partial class HostModViewModel : ObservableObject
 {
     private readonly HostViewModel _owner;
 
-    public HostModViewModel(HostViewModel owner, InstalledMod mod, ModNeed? chosen)
+    /// <param name="needs">Your choices, and the mods joining players are checked for (everyone gets those).</param>
+    public HostModViewModel(HostViewModel owner, InstalledMod mod, HostNeeds needs)
     {
         _owner = owner;
         Mod = mod;
-        ModNeed guess = mod.GuessedNeed;
+        Checked = needs.Checked(mod);
         Options = new List<NeedOption>
         {
-            new(null, Loc.F("Auto: {0}", Describe(guess))),
+            new(null, Loc.F("Auto: {0}", Describe(needs.Auto(mod)))),
             new(ModNeed.Everyone, Loc.T("Everyone needs it")),
             new(ModNeed.HostOnly, Loc.T("Only the host runs it")),
             new(ModNeed.ClientOnly, Loc.T("Client-side (my own game only)")),
         };
+        ModNeed? chosen = needs.Chosen(mod.Id);
         selected = Options.FirstOrDefault(o => o.Need == chosen) ?? Options[0];
     }
 
@@ -40,16 +42,23 @@ public partial class HostModViewModel : ObservableObject
     public string Author => Mod.IsLocal ? Loc.T("your PC") : Mod.Author.Replace('_', ' ');
     public IReadOnlyList<NeedOption> Options { get; }
 
+    /// <summary>Joining players are turned away without it (VoidManager or the game checks it), so the lobby lists it for everyone.</summary>
+    public bool Checked { get; }
+
     [ObservableProperty] private NeedOption selected;
 
-    public ModNeed Effective => Selected.Need ?? Mod.GuessedNeed;
+    public ModNeed Effective => Checked ? ModNeed.Everyone : Selected.Need ?? Mod.GuessedNeed;
     public bool JoinersGetIt => Effective is ModNeed.Everyone or ModNeed.Unknown;
+
+    /// <summary>You picked less than everyone for a mod joining players are checked for: everyone gets it anyway.</summary>
+    public bool Overridden => Checked && Selected.Need is { } need && need != ModNeed.Everyone;
 
     partial void OnSelectedChanged(NeedOption value)
     {
         _owner.SetNeed(Mod.Id, value.Need);
         OnPropertyChanged(nameof(Effective));
         OnPropertyChanged(nameof(JoinersGetIt));
+        OnPropertyChanged(nameof(Overridden));
     }
 
     private static string Describe(ModNeed need) => need switch
@@ -104,10 +113,10 @@ public partial class HostViewModel : ObservableObject
     public void RefreshMods()
     {
         Mods.Clear();
-        Dictionary<string, ModNeed> chosen = _main.Service.Settings.Host.ModNeeds;
+        HostNeeds needs = _main.Service.CurrentHostNeeds();
         foreach (InstalledMod mod in _main.Service.Library.Enabled.OrderBy(m => m.InstalledAsDependency).ThenBy(m => m.DisplayName))
         {
-            Mods.Add(new HostModViewModel(this, mod, chosen.TryGetValue(mod.Id, out ModNeed need) ? need : null));
+            Mods.Add(new HostModViewModel(this, mod, needs));
         }
         int limit = Mods.Any(m => BiggerRooms.Contains(m.Mod.Id, StringComparer.OrdinalIgnoreCase)) ? 16 : 6;
         _limiting = true;

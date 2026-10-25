@@ -22,7 +22,8 @@ it hosts lobbies with your mods in one click.
     players need of each;
   - lobbies whose host runs **VoidManager** (most modded lobbies) show VoidManager's list of mods and multiplayer types.
 - For each mod: whether **everyone needs it** or it's only the host's, and whether you **have it**, **will download it**,
-  or **can't get it** (the host's own mod, or not on Thunderstore).
+  or **can't get it** (not on Thunderstore, or a local mod of the host's that you don't have at its version). Your own
+  copy of a host's local mod is found by its plugin GUID, whatever it's called on your PC, and loaded for that game.
 - **JOIN** shows what it will do (download, which of your mods stay on, whether the game restarts), then:
   1. downloads the lobby's mods (and their dependencies, at the lobby's versions);
   2. restarts Void Crew with those mods, plus your client-side mods such as VR (only if the running game doesn't
@@ -65,7 +66,9 @@ it hosts lobbies with your mods in one click.
 - **HOST LOBBY** starts Void Crew with your enabled mods and opens the lobby straight away (through the game's own host
   panel), landing you in your hub.
 - Your lobby lists its mods for the server browser. For each mod you can say what joining players need (everyone, only
-  the host, client-side), or let the launcher decide from the mod's VoidManager type or Thunderstore categories.
+  the host, client-side), or let the launcher decide from the mod's VoidManager type or Thunderstore categories. A mod
+  that joining players are checked for (a VoidManager "All" mod, VoidManager itself then, or a mod whose assets the
+  game requires) is always listed for everyone.
 
 ![Host lobby](docs/screenshots/host-lobby.png)
 
@@ -152,11 +155,16 @@ the setup first: `https://github.com/CaptainChunck/VoidCrewModLauncher/releases/
 ## For mod authors
 
 - Hosts using the launcher put a room property `VCML` in the lobby list:
-  `vcml1;Namespace-Name@1.2.3!R;Namespace-Other@0.4.0!C;#LocalMod@1.0!C`, where the letter is what joining players need:
-  `R` everyone, `S` session (the room must be modded, joiners don't need it), `H` host only, `C` client-side,
-  `?` unknown. `#` marks a mod that isn't on Thunderstore.
+  `vcml1;Namespace-Name@1.2.3!R;Namespace-Other@0.4.0!C;#LocalMod@1.0!R:plugin.guid`, where the letter is what joining
+  players need: `R` everyone, `S` session (the room must be modded, joiners don't need it), `H` host only,
+  `C` client-side, `?` unknown. `#` marks a mod that isn't on Thunderstore; its BepInEx plugin GUIDs follow the letter
+  after a colon (from launcher 0.8.1; older launchers read only the letter).
 - VoidManager mods are read from VoidManager's `Mods` lobby property; set `ThunderstoreID` on your `VoidPlugin` so the
-  launcher can match your mod to its Thunderstore package even when its plugin name differs.
+  launcher can match your mod to its Thunderstore package even when its plugin name differs. The launcher also reads
+  your `VoidPlugin`'s `MPType` from the DLL (when it returns a constant): an `All` mod is needed by everyone, and stays
+  off when its owner joins a lobby that doesn't run it.
+- A mod that registers runtime assets or an external mod as required with the game's `RuntimeAssetsRegister` is listed
+  for everyone by hosts using the launcher, whatever its VoidManager type: the game turns away players without it.
 - Thunderstore categories decide what joiners need for mods the launcher knows nothing else about: `All Required` means
   everyone needs it, `Client-Side` only the player's own game, `Host-Side` only the host.
 

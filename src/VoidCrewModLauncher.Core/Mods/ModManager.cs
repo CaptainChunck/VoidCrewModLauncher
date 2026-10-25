@@ -172,22 +172,27 @@ public sealed class ModManager
     private TsVersion? Newest(TsPackage package) =>
         package.Versions.Where(v => !IsRefused(v)).MaxBy(v => v.VersionNumber, VersionNumber.Comparer) ?? package.Latest;
 
-    public static InstalledMod Describe(TsPackage package, TsVersion version, string folder) => new()
+    public static InstalledMod Describe(TsPackage package, TsVersion version, string folder)
     {
-        Id = package.FullName,
-        Source = package.IsGitHubOnly ? ModSource.GitHub : ModSource.Thunderstore,
-        Name = package.Name,
-        Author = package.Owner,
-        Version = version.VersionNumber,
-        Description = version.Description,
-        WebsiteUrl = string.IsNullOrEmpty(version.WebsiteUrl) ? package.PackageUrl : version.WebsiteUrl,
-        IconUrl = version.Icon,
-        GitHubRelease = version.GitHub?.ReleaseUrl,
-        Dependencies = version.Dependencies.ToList(),
-        Categories = package.Categories.ToList(),
-        PluginGuids = PluginScanner.ScanDirectory(folder).Select(p => p.Guid).Distinct().ToList(),
-        InstalledUtc = DateTime.UtcNow,
-    };
+        List<PluginInfo> plugins = PluginScanner.ScanDirectory(folder);
+        return new InstalledMod
+        {
+            Id = package.FullName,
+            Source = package.IsGitHubOnly ? ModSource.GitHub : ModSource.Thunderstore,
+            Name = package.Name,
+            Author = package.Owner,
+            Version = version.VersionNumber,
+            Description = version.Description,
+            WebsiteUrl = string.IsNullOrEmpty(version.WebsiteUrl) ? package.PackageUrl : version.WebsiteUrl,
+            IconUrl = version.Icon,
+            GitHubRelease = version.GitHub?.ReleaseUrl,
+            Dependencies = version.Dependencies.ToList(),
+            Categories = package.Categories.ToList(),
+            PluginGuids = plugins.Select(p => p.Guid).Distinct().ToList(),
+            VoidManagerType = PluginScanner.StrictestType(plugins),
+            InstalledUtc = DateTime.UtcNow,
+        };
+    }
 
     /// <summary>Installed mods whose version is behind Thunderstore's latest.</summary>
     public List<(InstalledMod Mod, TsVersion Latest)> Updates()

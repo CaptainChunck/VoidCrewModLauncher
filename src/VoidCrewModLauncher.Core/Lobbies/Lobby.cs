@@ -21,7 +21,13 @@ public enum LobbyModSource
 public sealed class LobbyMod
 {
     public string Name { get; init; } = "";
-    public string? Guid { get; set; }
+
+    /// <summary>
+    /// Its BepInEx plugin GUIDs, from the advert (local mods) or VoidManager's list: what identifies a local mod on
+    /// every PC, since its id comes from the file it was added from.
+    /// </summary>
+    public List<string> PluginGuids { get; init; } = new();
+
     public string Version { get; init; } = "";
     public ModNeed Need { get; set; }
 
@@ -112,6 +118,7 @@ public static class LobbyReader
                 mods.Add(new LobbyMod
                 {
                     Name = package?.DisplayName ?? mod.Id,
+                    PluginGuids = mod.PluginGuids?.ToList() ?? new List<string>(),
                     Version = mod.Version,
                     Need = mod.Need,
                     NeedFromHost = mod.Need != ModNeed.Unknown,
@@ -132,11 +139,14 @@ public static class LobbyReader
                 if (mod.MultiplayerType == 0 || mod.Guid == BridgeDefaults.PluginGuid) continue;
                 TsPackage? package = index.Find(mod.DownloadId) ?? index.FindByName(mod.Name);
                 ModNeed need = LobbyAdvert.FromVoidManagerType(mod.MultiplayerType);
-                LobbyMod? same = mods.FirstOrDefault(m => (package != null && m.Package == package) || PackageIndex.Simplify(m.Name) == PackageIndex.Simplify(mod.Name));
+                LobbyMod? same = mods.FirstOrDefault(m => m.PluginGuids.Contains(mod.Guid, StringComparer.OrdinalIgnoreCase))
+                                 ?? mods.FirstOrDefault(m => (package != null && m.Package == package) || PackageIndex.Simplify(m.Name) == PackageIndex.Simplify(mod.Name));
                 if (same != null)
                 {
-                    same.Guid ??= mod.Guid;
-                    if (!same.NeedFromHost && need != ModNeed.Unknown)
+                    if (!string.IsNullOrEmpty(mod.Guid) && !same.PluginGuids.Contains(mod.Guid, StringComparer.OrdinalIgnoreCase)) same.PluginGuids.Add(mod.Guid);
+                    // VoidManager turns away joining players without an "All" mod, whatever the advert says (a host before
+                    // launcher 0.8.1 could pick less on the HOST tab).
+                    if (need == ModNeed.Everyone || (!same.NeedFromHost && need != ModNeed.Unknown))
                     {
                         same.Need = need;
                         same.NeedFromHost = true;
@@ -149,7 +159,7 @@ public static class LobbyReader
                 mods.Add(new LobbyMod
                 {
                     Name = mod.Name,
-                    Guid = mod.Guid,
+                    PluginGuids = { mod.Guid },
                     Version = mod.Version,
                     Need = need,
                     NeedFromHost = need != ModNeed.Unknown,
@@ -157,6 +167,36 @@ public static class LobbyReader
                     Package = package,
                     PackageVersion = package?.Version(mod.Version),
                 });
+            }
+        }
+
+        // Once the host has a VoidManager "All" mod (VoidManager puts "[Mods Required]" in front of the room name then),
+        // VoidManager turns away joining players who don't run it, so everyone needs VoidManager itself. It isn't in its
+        // own list, and hosts before launcher 0.8.1 advertised it as a library only.
+        bool voidManagerChecks = voidManager?.Mods.Any(m => m.MultiplayerType == (byte)VoidManagerType.All) == true
+                                 || (room.Name ?? "").StartsWith("[Mods Required]", StringComparison.OrdinalIgnoreCase);
+        if (voidManagerChecks)
+        {
+            List<LobbyMod> carriers = mods.Where(m => ModPolicy.IsVoidManager(m.Package?.FullName ?? m.PackageId)
+                                                      || m.PluginGuids.Contains(ModPolicy.VoidManagerGuid, StringComparer.OrdinalIgnoreCase)).ToList();
+            if (carriers.Count == 0 && voidManager != null && ModPolicy.VoidManagerIds.Select(index.Find).FirstOrDefault(p => p != null) is { } package)
+            {
+                var added = new LobbyMod
+                {
+                    Name = package.DisplayName,
+                    PluginGuids = { ModPolicy.VoidManagerGuid },
+                    Version = voidManager.Value.Version,
+                    PackageId = package.FullName,
+                    Package = package,
+                    PackageVersion = package.Version(voidManager.Value.Version),
+                };
+                mods.Add(added);
+                carriers.Add(added);
+            }
+            foreach (LobbyMod carrier in carriers)
+            {
+                carrier.Need = ModNeed.Everyone;
+                carrier.NeedFromHost = true;
             }
         }
 

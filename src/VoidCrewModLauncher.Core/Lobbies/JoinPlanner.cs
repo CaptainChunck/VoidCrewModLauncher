@@ -7,13 +7,13 @@ namespace VoidCrewModLauncher.Core.Lobbies;
 
 public enum LobbyModStatus
 {
-    /// <summary>In the store at the version the lobby uses.</summary>
+    /// <summary>In the store at the version the lobby uses (for the host's local mod: your own copy of it).</summary>
     Ready,
 
     /// <summary>Will be downloaded from Thunderstore.</summary>
     Download,
 
-    /// <summary>The host's own mod or not on Thunderstore: the launcher can't get it.</summary>
+    /// <summary>The host's local mod that you don't have at its version, or not on Thunderstore: the launcher can't get it.</summary>
     Unavailable,
 
     /// <summary>Joining players don't need it (host-side or the host's own client mod).</summary>
@@ -36,6 +36,9 @@ public sealed class JoinPlanLine
     public TsVersion? Version { get; init; }
 
     public string? Note { get; init; }
+
+    /// <summary>Your copy of the host's local mod (the same plugin at the same version), loaded for this game.</summary>
+    public InstalledMod? Copy { get; init; }
 }
 
 /// <summary>What joining a lobby takes: which of its mods to load, which of yours stay on, what to download.</summary>
@@ -65,8 +68,9 @@ public sealed class ResolvedJoin
 }
 
 /// <summary>
-/// Works out how to join a lobby: its mods that joining players need (exact versions where Thunderstore has them),
-/// plus your client-side mods, plus every dependency; everything else you have turned on stays off for that game.
+/// Works out how to join a lobby: its mods that joining players need (exact versions where Thunderstore has them, and
+/// your own copies of the host's local mods), plus your client-side mods, plus every dependency; everything else you
+/// have turned on stays off for that game.
 /// </summary>
 public sealed class JoinPlanner
 {
@@ -85,20 +89,36 @@ public sealed class JoinPlanner
             plan.Warnings.Add(Loc.T("This lobby is modded but doesn't list its mods. If the game turns you away, the launcher looks up the mods it names."));
         }
 
+        IReadOnlyList<InstalledMod> library = _manager.Library.Mods;
         foreach (LobbyMod mod in lobby.Mods)
         {
             bool needed = mod.JoinerNeeds;
-            TsVersion? version = mod.PackageVersion ?? mod.Package?.Latest;
+            TsVersion? version = mod.Local ? null : mod.PackageVersion ?? mod.Package?.Latest;
             string? note = null;
-            if (needed && mod.Package != null && mod.PackageVersion == null && version != null)
-            {
-                note = Loc.F("The host has {0}; Thunderstore doesn't have that version, so {1} is used.", mod.Version, version.VersionNumber);
-            }
-
+            InstalledMod? copy = null;
             LobbyModStatus status;
-            if (!needed) status = LobbyModStatus.NotNeeded;
-            else if (!mod.Downloadable || version == null) status = LobbyModStatus.Unavailable;
-            else status = _manager.Store.Has(mod.Package!.FullName, version.VersionNumber) ? LobbyModStatus.Ready : LobbyModStatus.Download;
+            if (mod.Local)
+            {
+                // Nothing to download, but you may have the same plugin: added from your PC too, or from Thunderstore.
+                InstalledMod? otherVersion = null;
+                if (needed) copy = FindCopy(mod, library, m => _manager.Store.Has(m.Id, m.Version), out otherVersion);
+                status = !needed ? LobbyModStatus.NotNeeded : copy != null ? LobbyModStatus.Ready : LobbyModStatus.Unavailable;
+                if (status == LobbyModStatus.Unavailable) plan.Warnings.Add(MissingLocalMod(mod, otherVersion));
+            }
+            else
+            {
+                if (needed && mod.Package != null && mod.PackageVersion == null && version != null)
+                {
+                    note = Loc.F("The host has {0}; Thunderstore doesn't have that version, so {1} is used.", mod.Version, version.VersionNumber);
+                }
+                if (!needed) status = LobbyModStatus.NotNeeded;
+                else if (!mod.Downloadable || version == null) status = LobbyModStatus.Unavailable;
+                else status = _manager.Store.Has(mod.Package!.FullName, version.VersionNumber) ? LobbyModStatus.Ready : LobbyModStatus.Download;
+                if (needed && status == LobbyModStatus.Unavailable)
+                {
+                    plan.Warnings.Add(Loc.F("{0} {1} isn't on Thunderstore. You'll need to get it yourself.", mod.DisplayName, mod.Version));
+                }
+            }
 
             plan.Lines.Add(new JoinPlanLine
             {
@@ -108,27 +128,73 @@ public sealed class JoinPlanner
                 Status = status,
                 Version = version,
                 Note = note,
+                Copy = copy,
             });
-            if (needed && status == LobbyModStatus.Unavailable)
-            {
-                plan.Warnings.Add(mod.Local
-                    ? Loc.F("{0} is the host's own mod (not on Thunderstore). Ask the host for it, or the game may turn you away.", mod.DisplayName)
-                    : Loc.F("{0} {1} isn't on Thunderstore. You'll need to get it yourself.", mod.DisplayName, mod.Version));
-            }
         }
 
-        var loaded = plan.Lines.Where(l => l.Include).Select(l => l.Mod).ToList();
-        var neededNames = new HashSet<string>(loaded.Select(m => PackageIndex.Simplify(m.Package?.Name ?? m.Name)));
+        List<JoinPlanLine> loaded = plan.Lines.Where(l => l.Include).ToList();
+        var neededNames = new HashSet<string>(loaded.Select(l => PackageIndex.Simplify(l.Mod.Package?.Name ?? l.Mod.Name)));
+        var copies = new HashSet<string>(loaded.Where(l => l.Copy != null).Select(l => l.Copy!.Id), StringComparer.OrdinalIgnoreCase);
+        // The plugins this game loads for the lobby: another copy of one of them would load it twice.
+        var loadedGuids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (JoinPlanLine line in loaded)
+        {
+            loadedGuids.UnionWith(line.Mod.PluginGuids);
+            if (line.Copy != null) loadedGuids.UnionWith(line.Copy.PluginGuids);
+            else if (line.Mod.Package != null && _manager.Library.Find(line.Mod.Package.FullName) is { } installed) loadedGuids.UnionWith(installed.PluginGuids);
+        }
         foreach (InstalledMod mod in _manager.Library.Enabled)
         {
-            // The lobby's own version of it is loaded instead.
-            if (loaded.Any(m => m.Package != null && string.Equals(m.Package.FullName, mod.Id, StringComparison.OrdinalIgnoreCase))) continue;
-            // A local copy of a mod the lobby runs from Thunderstore would load the same plugin twice.
-            if (mod.IsLocal && neededNames.Contains(PackageIndex.Simplify(mod.Name))) plan.TurnedOff.Add(mod);
-            else if (ModPolicy.KeepWhenJoining(mod)) plan.Kept.Add(mod);
+            // Loaded as the lobby's own mod: its version from Thunderstore, or your copy of the host's local mod.
+            if (copies.Contains(mod.Id)) continue;
+            if (loaded.Any(l => l.Mod.Package != null && string.Equals(l.Mod.Package.FullName, mod.Id, StringComparison.OrdinalIgnoreCase))) continue;
+            if (mod.PluginGuids.Any(loadedGuids.Contains) || (mod.IsLocal && neededNames.Contains(PackageIndex.Simplify(mod.Name)))) plan.TurnedOff.Add(mod);
+            else if (ModPolicy.KeepWhenJoining(mod))
+            {
+                plan.Kept.Add(mod);
+                // Kept because you chose so: VoidManager turns away a player who has an "All" mod the host doesn't run.
+                if (mod.CheckedByVoidManager) plan.Warnings.Add(Loc.F("{0} stays on, but this lobby doesn't run it: the game may turn you away.", mod.DisplayName));
+            }
             else plan.TurnedOff.Add(mod);
         }
         return plan;
+    }
+
+    /// <summary>
+    /// Your copy of the host's local mod: an installed mod (added from your PC, or from Thunderstore) that has one of
+    /// its plugin GUIDs, at the same version; or, when the lobby doesn't say its GUIDs (a host before launcher 0.8.1
+    /// without VoidManager), one with the same name. A local mod's id can't be compared: it comes from the file it was
+    /// added from on each PC. <paramref name="otherVersion"/> is a copy at another version, when that's all there is.
+    /// </summary>
+    public static InstalledMod? FindCopy(LobbyMod mod, IEnumerable<InstalledMod> library, Func<InstalledMod, bool> inStore, out InstalledMod? otherVersion)
+    {
+        string name = PackageIndex.Simplify(mod.Name);
+        List<InstalledMod> candidates = library
+            .Where(m => mod.PluginGuids.Count > 0
+                ? m.PluginGuids.Any(g => mod.PluginGuids.Contains(g, StringComparer.OrdinalIgnoreCase))
+                : name.Length > 0 && PackageIndex.Simplify(m.Name) == name)
+            .Where(inStore)
+            .OrderByDescending(m => m.Enabled)
+            .ThenByDescending(m => m.IsLocal)
+            .ToList();
+        otherVersion = null;
+        bool anyVersion = string.IsNullOrEmpty(mod.Version) || mod.Version == "0";
+        foreach (InstalledMod candidate in candidates)
+        {
+            if (anyVersion || VersionNumber.Same(candidate.Version, mod.Version)) return candidate;
+            otherVersion ??= candidate;
+        }
+        return null;
+    }
+
+    /// <summary>Which of the host's local mods you're missing, by name and plugin GUID, and where to get it.</summary>
+    private static string MissingLocalMod(LobbyMod mod, InstalledMod? otherVersion)
+    {
+        List<string> guids = mod.PluginGuids.Count > 0 ? mod.PluginGuids : otherVersion?.PluginGuids ?? new List<string>();
+        string label = guids.Count > 0 ? $"{mod.DisplayName} ({string.Join(", ", guids)})" : mod.DisplayName;
+        return otherVersion != null
+            ? Loc.F("{0} is the host's local mod at version {1}, and you have {2}. It can't be downloaded: get the host's version from the host or its author.", label, mod.Version, otherVersion.Version)
+            : Loc.F("{0} is the host's local mod: it can't be downloaded. Get it from the host or its author.", label);
     }
 
     /// <summary>The mods to launch with for <paramref name="plan"/>, as the player left the ticks.</summary>
@@ -144,6 +210,23 @@ public sealed class JoinPlanner
             roots.Add((line.Mod.Package!, line.Version!));
             pinned[line.Mod.Package!.FullName] = line.Version!.VersionNumber;
             needs[line.Mod.Package!.FullName] = line.Mod.Need;
+        }
+        // Your copies of the host's local mods: from the store as they are (with their dependencies when from Thunderstore).
+        foreach (JoinPlanLine line in plan.Lines.Where(l => l.Include && l.Copy != null))
+        {
+            InstalledMod copy = line.Copy!;
+            TsPackage? package = copy.IsLocal ? null : _manager.Index.Find(copy.Id);
+            TsVersion? version = package?.Version(copy.Version);
+            if (package != null && version != null)
+            {
+                if (pinned.ContainsKey(package.FullName)) continue;
+                roots.Add((package, version));
+                pinned[package.FullName] = version.VersionNumber;
+                needs[package.FullName] = line.Mod.Need;
+                continue;
+            }
+            string folder = _manager.Store.VersionDirectory(copy.Id, copy.Version);
+            if (Directory.Exists(folder)) resolved.Mods.Add(new RuntimeMod(copy.Id, copy.Name, copy.Version, folder, copy.IsLocal, line.Mod.Need));
         }
         foreach (InstalledMod mod in plan.Kept)
         {

@@ -48,6 +48,7 @@ public sealed class LauncherService : IDisposable
         Website = new WebsiteClient(paths, httpHandler);
         Library = new ModLibrary(paths);
         Store = new PackageStore(paths, Thunderstore, GitHub);
+        ReadVoidManagerTypes();
         Mods = new ModManager(Library, Store);
         Planner = new JoinPlanner(Mods);
         Runtime = new RuntimeBuilder(paths);
@@ -104,6 +105,59 @@ public sealed class LauncherService : IDisposable
     }
 
     public void SaveSettings() => Settings.Save(Paths);
+
+    /// <summary>
+    /// Reads from the DLLs in the store the VoidManager type of installed mods that don't have one yet: mods installed
+    /// before the launcher read it (0.8.0 and older), or whose plugin decides it while the game runs (read again, cheaply).
+    /// </summary>
+    private void ReadVoidManagerTypes()
+    {
+        var types = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (InstalledMod mod in Library.Mods.Where(m => m.VoidManagerType == null))
+        {
+            string folder = Store.VersionDirectory(mod.Id, mod.Version);
+            if (Directory.Exists(folder) && PluginScanner.StrictestType(PluginScanner.ScanDirectory(folder)) is int type) types[mod.Id] = type;
+        }
+        if (types.Count == 0) return;
+        Library.UpdateAll(mod =>
+        {
+            if (mod.VoidManagerType != null || !types.TryGetValue(mod.Id, out int type)) return false;
+            mod.VoidManagerType = type;
+            return true;
+        });
+    }
+
+    /// <summary>
+    /// Remembers which of the running game's mods joining players were checked for, from the advert the game put on
+    /// the lobby it hosts, when the launcher can't tell that from the mods' DLLs (a mod that registers required game
+    /// assets, or one VoidManager's own settings make "All"): the HOST tab then shows them as needed by everyone, and the
+    /// next launch lists them so. True when something changed (settings are saved).
+    /// </summary>
+    public bool RememberCheckedMods(AdvertMessage advert)
+    {
+        List<LaunchMod>? launched = CurrentLaunch?.Mods;
+        if (launched == null) return false;
+        var required = new HashSet<string>(advert.Required ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
+        List<string> remembered = Settings.Host.CheckedInGame;
+        bool changed = false;
+        foreach (LaunchMod mod in launched.Where(m => !string.IsNullOrEmpty(m.Id)))
+        {
+            InstalledMod? mine = Library.Find(mod.Id);
+            bool seenInDlls = mine != null && (mine.CheckedByVoidManager || mine.IsVoidManager);
+            bool remember = required.Contains(mod.Id) && !seenInDlls;
+            bool known = remembered.Contains(mod.Id, StringComparer.OrdinalIgnoreCase);
+            if (remember == known) continue;
+            if (remember)
+            {
+                remembered.Add(mod.Id);
+                AppLog.Info($"Joining players are checked for {mod.Id} in the game; the HOST tab lists it for everyone from now on.");
+            }
+            else remembered.RemoveAll(id => string.Equals(id, mod.Id, StringComparison.OrdinalIgnoreCase));
+            changed = true;
+        }
+        if (changed) SaveSettings();
+        return changed;
+    }
 
     /// <summary>
     /// Loads Thunderstore's package list, then checks every installed Thunderstore mod against the per-package API: the
@@ -419,15 +473,19 @@ public sealed class LauncherService : IDisposable
 
     // ---------------------------------------------------------------- mod sets
 
+    /// <summary>What joining players need of each of your mods when you host (the HOST tab shows the same).</summary>
+    public HostNeeds CurrentHostNeeds() => new(Library.Enabled, Settings.Host.ModNeeds, Settings.Host.CheckedInGame);
+
     /// <summary>The mods of a Play or Host launch: every enabled mod and its dependencies, downloading what's missing.</summary>
     public async Task<List<RuntimeMod>> PlayModsAsync(CancellationToken cancel = default)
     {
         var mods = new List<RuntimeMod>();
         var roots = new List<(TsPackage, TsVersion)>();
+        HostNeeds needs = CurrentHostNeeds();
         foreach (InstalledMod mod in Library.Enabled)
         {
-            ModNeed need = Settings.Host.ModNeeds.TryGetValue(mod.Id, out ModNeed chosen) ? chosen : mod.GuessedNeed;
-            bool byUser = Settings.Host.ModNeeds.ContainsKey(mod.Id);
+            ModNeed need = needs.Effective(mod);
+            bool byUser = needs.Chosen(mod.Id) != null;
             TsPackage? package = mod.IsLocal ? null : Index.Find(mod.Id);
             TsVersion? version = package?.Version(mod.Version);
             if (package != null && version != null)
@@ -447,8 +505,10 @@ public sealed class LauncherService : IDisposable
             if (mods.Any(m => string.Equals(m.Id, package.FullName, StringComparison.OrdinalIgnoreCase))) continue;
             if (!enabledIds.Contains(package.FullName)) AppLog.Info($"Also loading {package.FullName} {version.VersionNumber}: another enabled mod needs it.");
             (string folder, TsVersion used) = await Mods.EnsureAsync(package, version, new SyncProgress<double>(f => Report(Loc.F("Downloading {0} {1}", package.DisplayName, version.VersionNumber), f)), cancel);
-            bool byUser = Settings.Host.ModNeeds.TryGetValue(package.FullName, out ModNeed chosen);
-            ModNeed need = byUser ? chosen : ModPolicy.GuessNeed(package.FullName, package.Categories);
+            bool byUser = needs.Chosen(package.FullName) != null;
+            // A dependency you have is judged like your own mods (its DLLs say what VoidManager checks); else from its page.
+            ModNeed need = Library.Find(package.FullName) is { } installed ? needs.Effective(installed)
+                : needs.Chosen(package.FullName) ?? ModPolicy.GuessNeed(package.FullName, package.Categories);
             mods.Add(new RuntimeMod(package.FullName, package.Name, used.VersionNumber, folder, false, need, byUser));
         }
 
@@ -459,7 +519,7 @@ public sealed class LauncherService : IDisposable
             string folder = Store.VersionDirectory(copy.Id, copy.Version);
             if (!Directory.Exists(folder)) continue;
             AppLog.Info($"Also loading {copy.Id} {copy.Version}: another enabled mod needs it.");
-            mods.Add(new RuntimeMod(copy.Id, copy.Name, copy.Version, folder, copy.IsLocal, copy.GuessedNeed));
+            mods.Add(new RuntimeMod(copy.Id, copy.Name, copy.Version, folder, copy.IsLocal, needs.Effective(copy)));
         }
         return mods;
     }

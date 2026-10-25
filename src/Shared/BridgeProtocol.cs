@@ -25,6 +25,7 @@ namespace VoidCrewModLauncher.Protocol
         public const string JoinResult = "joinResult";
         public const string HostResult = "hostResult";
         public const string Disconnected = "disconnected";
+        public const string Advert = "advert";
 
         // Launcher to bridge
         public const string Welcome = "welcome";
@@ -244,6 +245,19 @@ namespace VoidCrewModLauncher.Protocol
         public string DisplayName { get; set; }
     }
 
+    /// <summary>
+    /// The advert this game put on the lobby it hosts (see LobbyAdvert), sent when it is set up for a room. The launcher
+    /// learns from it which mods the game or VoidManager check on joining players, to show on the HOST tab next time.
+    /// </summary>
+    public class AdvertMessage : Message
+    {
+        public AdvertMessage() { Type = MessageTypes.Advert; }
+        public string Advert { get; set; }
+
+        /// <summary>Ids of this launch's mods (LaunchMod.Id) that joining players are checked for, so everyone gets them.</summary>
+        public List<string> Required { get; set; }
+    }
+
     // ------------------------------------------------------------------ launcher to bridge
 
     public class WelcomeMessage : Message
@@ -333,7 +347,8 @@ namespace VoidCrewModLauncher.Protocol
 
         /// <summary>
         /// The host chose <see cref="Need"/> on the launcher's HOST tab. Otherwise it is the launcher's guess, and the
-        /// bridge replaces it with the mod's own VoidManager multiplayer type when it has one.
+        /// bridge replaces it with the mod's own VoidManager multiplayer type when it has one. Either way, a mod the game
+        /// or VoidManager checks on joining players is listed for everyone (LobbyAdvert.AdvertisedNeed).
         /// </summary>
         public bool NeedSetByUser { get; set; }
 

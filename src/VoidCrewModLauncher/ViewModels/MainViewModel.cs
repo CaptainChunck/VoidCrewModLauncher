@@ -75,6 +75,10 @@ public partial class MainViewModel : ObservableObject
         service.Bridge.JoinResult += result => OnUi(() => Browser.OnJoinResult(result));
         service.Bridge.HostResult += result => OnUi(() => Host.OnHostResult(result));
         service.Bridge.GameLeftRoom += left => OnUi(() => Browser.OnGameLeftRoom(left));
+        service.Bridge.AdvertPublished += advert => OnUi(() =>
+        {
+            if (service.RememberCheckedMods(advert)) Host.RefreshMods();
+        });
 
         _timer = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background, (_, _) => UpdateGameState(), _dispatcher);
         _timer.Start();

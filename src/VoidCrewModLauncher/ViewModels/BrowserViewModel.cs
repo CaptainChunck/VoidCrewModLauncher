@@ -400,13 +400,21 @@ public partial class BrowserViewModel : ObservableObject
             string simple = PackageIndex.Simplify(StripVersion(string.IsNullOrEmpty(invalid.DisplayName) ? invalid.Name : invalid.DisplayName));
             extra.AddRange(join.Mods.Where(m => PackageIndex.Simplify(m.Name) == simple || PackageIndex.Simplify(m.Id).EndsWith(simple, StringComparison.Ordinal)));
         }
+        // The game often names what's missing by a mod's assets (a mission, an item) rather than the mod. The host's own
+        // mods this join left out (listed as only the host's) are then the likely owners: a mod the game requires that the
+        // host didn't list for everyone (hosts before launcher 0.8.1 couldn't tell).
+        List<LobbyMod> leftOut = notFound.Count == 0 ? new List<LobbyMod>()
+            : lobby.Mods.Where(m => m is { Downloadable: true, JoinerNeeds: false, Need: not ModNeed.ClientOnly }
+                                    && (m.PackageVersion ?? m.Package!.Latest) != null
+                                    && join.Mods.All(r => !string.Equals(r.Id, m.Package!.FullName, StringComparison.OrdinalIgnoreCase))).ToList();
 
         var message = new System.Text.StringBuilder(Loc.F("{0} turned Void Crew away because the mods don't match.", lobby.Name)).Append('\n');
         if (found.Count > 0) message.Append('\n').Append(Loc.T("It needs (found on Thunderstore):")).Append('\n').AppendJoin("\n", found.Select(f => "  • " + Loc.F("{0} → {1} by {2}", f.Name, f.Package.DisplayName, f.Package.Author))).Append('\n');
         if (notFound.Count > 0) message.Append('\n').Append(Loc.T("It needs (not found on Thunderstore):")).Append('\n').AppendJoin("\n", notFound.Select(n => "  • " + n)).Append('\n');
+        if (leftOut.Count > 0) message.Append('\n').Append(Loc.T("Also loading the host's other mods:")).Append('\n').AppendJoin("\n", leftOut.Select(m => "  • " + m.DisplayName)).Append('\n');
         if (extra.Count > 0) message.Append('\n').Append(Loc.T("It doesn't allow:")).Append('\n').AppendJoin("\n", extra.Select(m => "  • " + m.Name.Replace('_', ' '))).Append('\n');
 
-        if (found.Count == 0 && extra.Count == 0)
+        if (found.Count == 0 && extra.Count == 0 && leftOut.Count == 0)
         {
             _main.Dialogs.Error(Loc.T("Mods don't match"), message.ToString());
             return;
@@ -416,7 +424,14 @@ public partial class BrowserViewModel : ObservableObject
         var fixedJoin = new ResolvedJoin();
         fixedJoin.Mods.AddRange(join.Mods.Except(extra));
         var roots = found.Select(f => (f.Package, f.Package.Latest!)).ToList();
-        foreach ((TsPackage package, TsVersion version) in _main.Service.Mods.Resolve(roots))
+        var pinned = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (LobbyMod mod in leftOut)
+        {
+            TsVersion version = (mod.PackageVersion ?? mod.Package!.Latest)!;
+            roots.Add((mod.Package!, version));
+            pinned[mod.Package!.FullName] = version.VersionNumber;
+        }
+        foreach ((TsPackage package, TsVersion version) in _main.Service.Mods.Resolve(roots, pinned))
         {
             if (fixedJoin.Mods.Any(m => string.Equals(m.Id, package.FullName, StringComparison.OrdinalIgnoreCase))) continue;
             string folder = _main.Service.Store.VersionDirectory(package.FullName, version.VersionNumber);

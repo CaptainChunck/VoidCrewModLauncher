@@ -12,7 +12,8 @@ namespace VoidCrewModLauncher.Bridge
 {
     /// <summary>
     /// The few places the bridge listens to the game. None of them change what the game does: they only report when a
-    /// room was created or joined, when a join failed, and why the game left a room (with the names of missing mods).
+    /// room was created or joined, when a join failed, why the game left a room (with the names of missing mods), and
+    /// which mod registered each of the game's runtime assets and external mods (for <see cref="ModChecks"/>).
     /// Each patch is applied on its own, so a game update that moves one method only turns off that report.
     /// </summary>
     internal static class Patches
@@ -26,6 +27,9 @@ namespace VoidCrewModLauncher.Bridge
             Prefix(harmony, typeof(PhotonService), "OnJoinRoomFailed", nameof(JoinRoomFailed));
             Postfix(harmony, typeof(PhotonService), "OnMasterClientSwitched", nameof(MasterClientSwitched));
             Prefix(harmony, typeof(GSPhotonDisconnected), "OnEnter", nameof(Disconnected));
+            Postfix(harmony, typeof(RuntimeAssetsRegister), "RegisterAsset", nameof(Registered));
+            Postfix(harmony, typeof(RuntimeAssetsRegister), "RegisterExternalMod", nameof(Registered));
+            Postfix(harmony, typeof(RuntimeAssetsRegister), "AddAssetEffect", nameof(Registered));
         }
 
         private static void Postfix(Harmony harmony, Type type, string method, string patch)
@@ -117,6 +121,19 @@ namespace VoidCrewModLauncher.Bridge
             catch (Exception e)
             {
                 Log.Failure("Taking over the lobby advert", e);
+            }
+        }
+
+        /// <summary>After a mod registers one of the game's runtime assets or external mods, or changes what it requires.</summary>
+        private static void Registered(GUIDUnion guid)
+        {
+            try
+            {
+                ModChecks.NoteRegistration(guid);
+            }
+            catch (Exception e)
+            {
+                Log.Failure("Noting which mod registered a game asset", e);
             }
         }
 

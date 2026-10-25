@@ -42,6 +42,9 @@ public sealed class BridgeServer : IDisposable
     public event Action<HostResultMessage>? HostResult;
     public event Action<DisconnectedMessage>? GameLeftRoom;
 
+    /// <summary>The game put its advert on a lobby it hosts.</summary>
+    public event Action<AdvertMessage>? AdvertPublished;
+
     /// <summary>Starts listening; returns false when every port is taken (another launcher is probably running).</summary>
     public bool Start()
     {
@@ -206,6 +209,8 @@ public sealed class BridgeServer : IDisposable
                 return message.Deserialize<HostResultMessage>(JsonFiles.Protocol) is { } host ? () => HostResult?.Invoke(host) : null;
             case MessageTypes.Disconnected:
                 return message.Deserialize<DisconnectedMessage>(JsonFiles.Protocol) is { } left ? () => GameLeftRoom?.Invoke(left) : null;
+            case MessageTypes.Advert:
+                return message.Deserialize<AdvertMessage>(JsonFiles.Protocol) is { } advert ? () => AdvertPublished?.Invoke(advert) : null;
             default:
                 return null;
         }

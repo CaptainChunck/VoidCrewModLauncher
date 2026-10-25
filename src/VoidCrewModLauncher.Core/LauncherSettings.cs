@@ -97,6 +97,13 @@ public sealed class HostSettings
 
     /// <summary>The host's choice of what joining players need, per mod id; mods not listed use the launcher's guess.</summary>
     public Dictionary<string, ModNeed> ModNeeds { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Mod ids joining players were checked for when you last hosted with them, as the bridge reported it, that the
+    /// launcher can't tell from the mods' DLLs: mods that register required game assets (whatever their VoidManager type
+    /// says), or that VoidManager's own settings make "All". Everyone gets them, whatever ModNeeds says.
+    /// </summary>
+    public List<string> CheckedInGame { get; set; } = new();
 }
 
 public sealed class BrowserSettings
