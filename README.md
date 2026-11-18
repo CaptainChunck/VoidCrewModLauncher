@@ -223,4 +223,9 @@ lobby's mod list is added to it through Void Crew's own lobby system, so players
 
 ## License
 
-GPL-3.0. See [LICENSE](LICENSE). Not made or supported by Hutlihut Games.
+[PolyForm Noncommercial License 1.0.0](LICENSE.md) - Copyright (c) 2026 CaptainChunck.
+
+You may use, copy, change and share this launcher and its code for any **non-commercial** purpose (personal use, hobby projects, modding, study). **Selling it, or using it for commercial purposes, is not allowed.** Anyone who passes it on must include the licence and the `Required Notice` line.
+
+Versions up to and including v0.9.3 were released under GPL-3.0 and stay under that licence.
+Not made or supported by Hutlihut Games.
